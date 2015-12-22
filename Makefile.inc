@@ -4,6 +4,12 @@ PKG_NAME := docker-machine
 GITHUB_INFO := $(shell git config --get remote.origin.url | sed -e 's/.*:\(.*\).git/\1/')
 GH_USER ?= $(shell echo $(GITHUB_INFO) | cut -d \/ -f 1)
 GH_REPO ?= $(shell echo $(GITHUB_INFO) | cut -d \/ -f 2)
+ifeq ($(strip $(GH_USER)),)
+GH_USER = docker
+endif
+ifeq ($(strip $(GH_REPO)),)
+GH_REPO = docker
+endif
 
 # If true, disable optimizations and does NOT strip the binary
 DEBUG ?=
