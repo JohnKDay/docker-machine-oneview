@@ -3,10 +3,9 @@ GO_PACKAGES := github.com/docker/docker/pkg/term
 GO_PACKAGES := $(GO_PACKAGES) github.com/docker/machine
 GO_PACKAGES := $(GO_PACKAGES) github.com/stretchr/testify/assert
 GO_PACKAGES := $(GO_PACKAGES) golang.org/x/crypto/ssh
+# needed by docker/docker or docker/machine
 GO_PACKAGES := $(GO_PACKAGES) github.com/Sirupsen/logrus
 GO_PACKAGES := $(GO_PACKAGES) github.com/Azure/go-ansiterm
-GO_PACKAGES := $(GO_PACKAGES) github.com/davecgh/go-spew/spew
-GO_PACKAGES := $(GO_PACKAGES) github.com/pmezard/go-difflib/difflib
 
 GO15VENDOREXPERIMENT := 1
 

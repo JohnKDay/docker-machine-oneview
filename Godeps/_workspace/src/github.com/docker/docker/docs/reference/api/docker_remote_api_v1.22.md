@@ -1,6 +1,5 @@
 <!--[metadata]>
 +++
-draft=true
 title = "Remote API v1.22"
 description = "API Documentation for Docker"
 keywords = ["API, Docker, rcli, REST,  documentation"]
@@ -16,7 +15,7 @@ weight=-3
 
  - The Remote API has replaced `rcli`.
  - The daemon listens on `unix:///var/run/docker.sock` but you can
-   [Bind Docker to another host/port or a Unix socket](../../articles/basics.md#bind-docker-to-another-hostport-or-a-unix-socket).
+   [Bind Docker to another host/port or a Unix socket](../../userguide/basics.md#bind-docker-to-another-host-port-or-a-unix-socket).
  - The API tends to be REST. However, for some complex commands, like `attach`
    or `pull`, the HTTP connection is hijacked to transport `stdout`,
    `stdin` and `stderr`.
@@ -58,7 +57,21 @@ List containers
                          "com.example.version": "1.0"
                  },
                  "SizeRw": 12288,
-                 "SizeRootFs": 0
+                 "SizeRootFs": 0,
+                 "NetworkSettings": {
+                         "Networks": {
+                                 "bridge": {
+                                          "EndpointID": "2cdc4edb1ded3631c81f57966563e5c8525b81121bb3706a9a9a3ae102711f3f",
+                                          "Gateway": "172.17.0.1",
+                                          "IPAddress": "172.17.0.2",
+                                          "IPPrefixLen": 16,
+                                          "IPv6Gateway": "",
+                                          "GlobalIPv6Address": "",
+                                          "GlobalIPv6PrefixLen": 0,
+                                          "MacAddress": "02:42:ac:11:00:02"
+                                  }
+                         }
+                 }
          },
          {
                  "Id": "9cd87474be90",
@@ -71,7 +84,22 @@ List containers
                  "Ports": [],
                  "Labels": {},
                  "SizeRw": 12288,
-                 "SizeRootFs": 0
+                 "SizeRootFs": 0,
+                 "NetworkSettings": {
+                         "Networks": {
+                                 "bridge": {
+                                          "EndpointID": "88eaed7b37b38c2a3f0c4bc796494fdf51b270c2d22656412a2ca5d559a64d7a",
+                                          "Gateway": "172.17.0.1",
+                                          "IPAddress": "172.17.0.8",
+                                          "IPPrefixLen": 16,
+                                          "IPv6Gateway": "",
+                                          "GlobalIPv6Address": "",
+                                          "GlobalIPv6PrefixLen": 0,
+                                          "MacAddress": "02:42:ac:11:00:08"
+                                  }
+                         }
+                 }
+
          },
          {
                  "Id": "3176a2479c92",
@@ -84,7 +112,22 @@ List containers
                  "Ports":[],
                  "Labels": {},
                  "SizeRw":12288,
-                 "SizeRootFs":0
+                 "SizeRootFs":0,
+                 "NetworkSettings": {
+                         "Networks": {
+                                 "bridge": {
+                                          "EndpointID": "8b27c041c30326d59cd6e6f510d4f8d1d570a228466f956edf7815508f78e30d",
+                                          "Gateway": "172.17.0.1",
+                                          "IPAddress": "172.17.0.6",
+                                          "IPPrefixLen": 16,
+                                          "IPv6Gateway": "",
+                                          "GlobalIPv6Address": "",
+                                          "GlobalIPv6PrefixLen": 0,
+                                          "MacAddress": "02:42:ac:11:00:06"
+                                  }
+                         }
+                 }
+
          },
          {
                  "Id": "4cb07b47f9fb",
@@ -97,7 +140,22 @@ List containers
                  "Ports": [],
                  "Labels": {},
                  "SizeRw": 12288,
-                 "SizeRootFs": 0
+                 "SizeRootFs": 0,
+                 "NetworkSettings": {
+                         "Networks": {
+                                 "bridge": {
+                                          "EndpointID": "d91c7b2f0644403d7ef3095985ea0e2370325cd2332ff3a3225c4247328e66e9",
+                                          "Gateway": "172.17.0.1",
+                                          "IPAddress": "172.17.0.5",
+                                          "IPPrefixLen": 16,
+                                          "IPv6Gateway": "",
+                                          "GlobalIPv6Address": "",
+                                          "GlobalIPv6PrefixLen": 0,
+                                          "MacAddress": "02:42:ac:11:00:05"
+                                  }
+                         }
+                 }
+
          }
     ]
 
@@ -115,9 +173,9 @@ Query Parameters:
         sizes
 -   **filters** - a JSON encoded value of the filters (a `map[string][]string`) to process on the containers list. Available filters:
   -   `exited=<int>`; -- containers with exit code of  `<int>` ;
-  -   `status=`(`created`|`restarting`|`running`|`paused`|`exited`)
+  -   `status=`(`created`|`restarting`|`running`|`paused`|`exited`|`dead`)
   -   `label=key` or `label="key=value"` of a container label
-  -   `isolation=`(`default`|`hyperv`)   (Windows daemon only)
+  -   `isolation=`(`default`|`process`|`hyperv`)   (Windows daemon only)
 
 Status Codes:
 
@@ -188,8 +246,14 @@ Create a container
              "CpusetCpus": "0,1",
              "CpusetMems": "0,1",
              "BlkioWeight": 300,
+             "BlkioWeightDevice": [{}],
+             "BlkioDeviceReadBps": [{}],
+             "BlkioDeviceReadIOps": [{}],
+             "BlkioDeviceWriteBps": [{}],
+             "BlkioDeviceWriteIOps": [{}],
              "MemorySwappiness": 60,
              "OomKillDisable": false,
+             "OomScoreAdj": 500,
              "PortBindings": { "22/tcp": [{ "HostPort": "11022" }] },
              "PublishAllPorts": false,
              "Privileged": false,
@@ -208,7 +272,8 @@ Create a container
              "LogConfig": { "Type": "json-file", "Config": {} },
              "SecurityOpt": [""],
              "CgroupParent": "",
-             "VolumeDriver": ""
+             "VolumeDriver": "",
+             "ShmSize": 67108864
           }
       }
 
@@ -242,8 +307,18 @@ Json Parameters:
 -   **CpusetCpus** - String value containing the `cgroups CpusetCpus` to use.
 -   **CpusetMems** - Memory nodes (MEMs) in which to allow execution (0-3, 0,1). Only effective on NUMA systems.
 -   **BlkioWeight** - Block IO weight (relative weight) accepts a weight value between 10 and 1000.
+-   **BlkioWeightDevice** - Block IO weight (relative device weight) in the form of:        `"BlkioWeightDevice": [{"Path": "device_path", "Weight": weight}]`
+-   **BlkioDeviceReadBps** - Limit read rate (bytes per second) from a device in the form of:	`"BlkioDeviceReadBps": [{"Path": "device_path", "Rate": rate}]`, for example:
+	`"BlkioDeviceReadBps": [{"Path": "/dev/sda", "Rate": "1024"}]"`
+-   **BlkioDeviceWriteBps** - Limit write rate (bytes per second) to a device in the form of:	`"BlkioDeviceWriteBps": [{"Path": "device_path", "Rate": rate}]`, for example:
+	`"BlkioDeviceWriteBps": [{"Path": "/dev/sda", "Rate": "1024"}]"`
+-   **BlkioDeviceReadIOps** - Limit read rate (IO per second) from a device in the form of:	`"BlkioDeviceReadIOps": [{"Path": "device_path", "Rate": rate}]`, for example:
+	`"BlkioDeviceReadIOps": [{"Path": "/dev/sda", "Rate": "1000"}]`
+-   **BlkioDeviceWiiteIOps** - Limit write rate (IO per second) to a device in the form of:	`"BlkioDeviceWriteIOps": [{"Path": "device_path", "Rate": rate}]`, for example:
+	`"BlkioDeviceWriteIOps": [{"Path": "/dev/sda", "Rate": "1000"}]`
 -   **MemorySwappiness** - Tune a container's memory swappiness behavior. Accepts an integer between 0 and 100.
 -   **OomKillDisable** - Boolean value, whether to disable OOM Killer for the container or not.
+-   **OomScoreAdj** - An integer value containing the score given to the container in order to tune OOM killer preferences.
 -   **AttachStdin** - Boolean value, attaches to `stdin`.
 -   **AttachStdout** - Boolean value, attaches to `stdout`.
 -   **AttachStderr** - Boolean value, attaches to `stderr`.
@@ -317,6 +392,7 @@ Json Parameters:
           `json-file` logging driver.
     -   **CgroupParent** - Path to `cgroups` under which the container's `cgroup` is created. If the path is not absolute, the path is considered to be relative to the `cgroups` path of the init process. Cgroups are created if they do not already exist.
     -   **VolumeDriver** - Driver that this container users to mount volumes.
+    -   **ShmSize** - Size of `/dev/shm` in bytes. The size must be greater than 0.  If omitted the system uses 64MB.
 
 Query Parameters:
 
@@ -392,6 +468,11 @@ Return low-level information on the container `id`
 		"HostConfig": {
 			"Binds": null,
 			"BlkioWeight": 0,
+			"BlkioWeightDevice": [{}],
+			"BlkioDeviceReadBps": [{}],
+			"BlkioDeviceWriteBps": [{}],
+			"BlkioDeviceReadIOps": [{}],
+			"BlkioDeviceWriteIOps": [{}],
 			"CapAdd": null,
 			"CapDrop": null,
 			"ContainerIDFile": "",
@@ -412,6 +493,7 @@ Return low-level information on the container `id`
 			"MemoryReservation": 0,
 			"KernelMemory": 0,
 			"OomKillDisable": false,
+			"OomScoreAdj": 500,
 			"NetworkMode": "bridge",
 			"PortBindings": {},
 			"Privileged": false,
@@ -428,7 +510,8 @@ Return low-level information on the container `id`
 			"SecurityOpt": null,
 			"VolumesFrom": null,
 			"Ulimits": [{}],
-			"VolumeDriver": ""
+			"VolumeDriver": "",
+			"ShmSize": 67108864
 		},
 		"HostnamePath": "/var/lib/docker/containers/ba033ac4401106a3b513bc9d639eee123ad78ca3616b921167cd74b20e25ed39/hostname",
 		"HostsPath": "/var/lib/docker/containers/ba033ac4401106a3b513bc9d639eee123ad78ca3616b921167cd74b20e25ed39/hosts",
@@ -477,6 +560,7 @@ Return low-level information on the container `id`
 			"ExitCode": 9,
 			"FinishedAt": "2015-01-06T15:47:32.080254511Z",
 			"OOMKilled": false,
+			"Dead": false,
 			"Paused": false,
 			"Pid": 0,
 			"Restarting": false,
@@ -524,7 +608,9 @@ Status Codes:
 
 `GET /containers/(id)/top`
 
-List processes running inside the container `id`
+List processes running inside the container `id`. On Unix systems this
+is done by running the `ps` command. This endpoint is not
+supported on Windows.
 
 **Example request**:
 
@@ -536,28 +622,45 @@ List processes running inside the container `id`
     Content-Type: application/json
 
     {
-         "Titles": [
-                 "USER",
-                 "PID",
-                 "%CPU",
-                 "%MEM",
-                 "VSZ",
-                 "RSS",
-                 "TTY",
-                 "STAT",
-                 "START",
-                 "TIME",
-                 "COMMAND"
-                 ],
-         "Processes": [
-                 ["root","20147","0.0","0.1","18060","1864","pts/4","S","10:06","0:00","bash"],
-                 ["root","20271","0.0","0.0","4312","352","pts/4","S+","10:07","0:00","sleep","10"]
+       "Titles" : [
+         "UID", "PID", "PPID", "C", "STIME", "TTY", "TIME", "CMD"
+       ],
+       "Processes" : [
+         [
+           "root", "13642", "882", "0", "17:03", "pts/0", "00:00:00", "/bin/bash"
+         ],
+         [
+           "root", "13735", "13642", "0", "17:06", "pts/0", "00:00:00", "sleep 10"
          ]
+       ]
+    }
+
+**Example request**:
+
+    GET /containers/4fa6e0f0c678/top?ps_args=aux HTTP/1.1
+
+**Example response**:
+
+    HTTP/1.1 200 OK
+    Content-Type: application/json
+
+    {
+      "Titles" : [
+        "USER","PID","%CPU","%MEM","VSZ","RSS","TTY","STAT","START","TIME","COMMAND"
+      ]
+      "Processes" : [
+        [
+          "root","13642","0.0","0.1","18172","3184","pts/0","Ss","17:03","0:00","/bin/bash"
+        ],
+        [
+          "root","13895","0.0","0.0","4348","692","pts/0","S+","17:15","0:00","sleep 10"
+        ]
+      ],
     }
 
 Query Parameters:
 
--   **ps_args** – ps arguments to use (e.g., aux)
+-   **ps_args** – `ps` arguments to use (e.g., `aux`), defaults to `-ef`
 
 Status Codes:
 
@@ -759,10 +862,9 @@ This endpoint returns a live stream of a container's resource usage statistics.
                "total_usage" : 36488948,
                "usage_in_kernelmode" : 20000000
             },
-            "system_cpu_usage" : 20091722000000000,
+            "system_cpu_usage" : 20091722000000000,
             "throttling_data" : {}
-         }
-      }
+         }      }
 
 Query Parameters:
 
@@ -818,6 +920,12 @@ Start the container `id`
 **Example response**:
 
     HTTP/1.1 204 No Content
+
+Query Parameters:
+
+-   **detacheys** – Override the key sequence for detaching a
+        container. Format is a single character `[a-Z]` or `ctrl-<value>`
+        where `<value>` is one of: `a-z`, `@`, `^`, `[`, `,` or `_`.
 
 Status Codes:
 
@@ -897,6 +1005,50 @@ Query Parameters
 Status Codes:
 
 -   **204** – no error
+-   **404** – no such container
+-   **500** – server error
+
+### Update a container
+
+`POST /containers/(id)/update`
+
+Update resource configs of one or more containers.
+
+**Example request**:
+
+       POST /containers/(id)/update HTTP/1.1
+       Content-Type: application/json
+
+       {
+           "HostConfig": {
+               "Resources": {
+                   "BlkioWeight": 300,
+                   "CpuShares": 512,
+                   "CpuPeriod": 100000,
+                   "CpuQuota": 50000,
+                   "CpusetCpus": "0,1",
+                   "CpusetMems": "0",
+                   "Memory": 314572800,
+                   "MemorySwap": 514288000,
+                   "MemoryReservation": 209715200,
+                   "KernelMemory": 52428800,
+               }
+           }
+       }
+
+**Example response**:
+
+       HTTP/1.1 200 OK
+       Content-Type: application/json
+
+       {
+           "Warnings": []
+       }
+
+Status Codes:
+
+-   **200** – no error
+-   **400** – bad parameter
 -   **404** – no such container
 -   **500** – server error
 
@@ -986,6 +1138,9 @@ Attach to the container `id`
 
 Query Parameters:
 
+-   **detacheys** – Override the key sequence for detaching a
+        container. Format is a single character `[a-Z]` or `ctrl-<value>`
+        where `<value>` is one of: `a-z`, `@`, `^`, `[`, `,` or `_`.
 -   **logs** – 1/True/true or 0/False/false, return logs. Default `false`.
 -   **stream** – 1/True/true or 0/False/false, return stream.
         Default `false`.
@@ -1066,6 +1221,9 @@ Implements websocket protocol handshake according to [RFC 6455](http://tools.iet
 
 Query Parameters:
 
+-   **detacheys** – Override the key sequence for detaching a
+        container. Format is a single character `[a-Z]` or `ctrl-<value>`
+        where `<value>` is one of: `a-z`, `@`, `^`, `[`, `,` or `_`.
 -   **logs** – 1/True/true or 0/False/false, return logs. Default `false`.
 -   **stream** – 1/True/true or 0/False/false, return stream.
         Default `false`.
@@ -1433,6 +1591,7 @@ Query Parameters:
         context for command(s) run via the Dockerfile's `RUN` instruction or for
         variable expansion in other Dockerfile instructions. This is not meant for
         passing secret values. [Read more about the buildargs instruction](../../reference/builder.md#arg)
+-   **shmsize** - Size of `/dev/shm` in bytes. The size must be greater than 0.  If omitted the system uses 64MB.
 
     Request Headers:
 
@@ -1493,6 +1652,7 @@ Query Parameters:
 
 -   **fromImage** – Name of the image to pull. The name may include a tag or
         digest. This parameter may only be used when pulling an image.
+        The pull is cancelled if the HTTP connection is closed.
 -   **fromSrc** – Source to import.  The value may be a URL from which the image
         can be retrieved or `-` to read the image from the request body.
         This parameter may only be used when importing an image.
@@ -1503,7 +1663,24 @@ Query Parameters:
 
     Request Headers:
 
--   **X-Registry-Auth** – base64-encoded AuthConfig object
+-   **X-Registry-Auth** – base64-encoded AuthConfig object, containing either login information, or a token
+    - Credential based login:
+
+        ```
+    {
+            "username": "jdoe",
+            "password": "secret",
+            "email": "jdoe@acme.com",
+    }
+        ```
+
+    - Token based login:
+
+        ```
+    {
+            "registrytoken": "9cbaf023786cd7..."
+    }
+        ```
 
 Status Codes:
 
@@ -1701,6 +1878,8 @@ If you wish to push an image on to a private registry, that image must already h
 into a repository which references that registry `hostname` and `port`.  This repository name should
 then be used in the URL. This duplicates the command line's flow.
 
+The push is cancelled if the HTTP connection is closed.
+
 **Example request**:
 
     POST /images/registry.acme.com:5000/test/push HTTP/1.1
@@ -1712,8 +1891,24 @@ Query Parameters:
 
 Request Headers:
 
--   **X-Registry-Auth** – Include a base64-encoded AuthConfig.
-        object.
+-   **X-Registry-Auth** – base64-encoded AuthConfig object, containing either login information, or a token
+    - Credential based login:
+
+        ```
+    {
+            "username": "jdoe",
+            "password": "secret",
+            "email": "jdoe@acme.com",
+    }
+        ```
+
+    - Token based login:
+
+        ```
+    {
+            "registrytoken": "9cbaf023786cd7..."
+    }
+        ```
 
 Status Codes:
 
@@ -1881,6 +2076,7 @@ Display system-wide information
     Content-Type: application/json
 
     {
+        "Architecture": "x86_64",
         "Containers": 11,
         "CpuCfsPeriod": true,
         "CpuCfsQuota": true,
@@ -1889,6 +2085,16 @@ Display system-wide information
         "DockerRootDir": "/var/lib/docker",
         "Driver": "btrfs",
         "DriverStatus": [[""]],
+        "Plugins": {
+            "Volume": [
+                "local"
+            ],
+            "Network": [
+                "null",
+                "host",
+                "bridge"
+            ]
+        },
         "ExecutionDriver": "native-0.1",
         "ExperimentalBuild": false,
         "HttpProxy": "http://test:test@localhost:8080",
@@ -1912,6 +2118,8 @@ Display system-wide information
         "Name": "prod-server-42",
         "NoProxy": "9.81.1.160",
         "OomKillDisable": true,
+        "OSType": "linux",
+        "OomScoreAdj": 500,
         "OperatingSystem": "Boot2Docker",
         "RegistryConfig": {
             "IndexConfigs": {
@@ -1952,14 +2160,15 @@ Show the docker version information
     Content-Type: application/json
 
     {
-         "Version": "1.5.0",
+         "Version": "1.10.0-dev",
          "Os": "linux",
-         "KernelVersion": "3.18.5-tinycore64",
-         "GoVersion": "go1.4.1",
-         "GitCommit": "a8a31ef",
+         "KernelVersion": "3.19.0-23-generic",
+         "GoVersion": "go1.4.2",
+         "GitCommit": "e75da4b",
          "Arch": "amd64",
-         "ApiVersion": "1.20",
-         "Experimental": false
+         "ApiVersion": "1.22",
+         "BuildTime": "2015-12-01T07:09:13.444803460+00:00",
+         "Experimental": true
     }
 
 Status Codes:
@@ -2065,16 +2274,23 @@ Status Codes:
 
 `GET /events`
 
-Get container events from docker, either in real time via streaming, or via
-polling (using since).
+Get container events from docker, either in real time via streaming, or via polling (using since).
 
 Docker containers report the following events:
 
-    attach, commit, copy, create, destroy, die, exec_create, exec_start, export, kill, oom, pause, rename, resize, restart, start, stop, top, unpause
+    attach, commit, copy, create, destroy, die, exec_create, exec_start, export, kill, oom, pause, rename, resize, restart, start, stop, top, unpause, update
 
-and Docker images report:
+Docker images report the following events:
 
     delete, import, pull, push, tag, untag
+
+Docker volumes report the following events:
+
+    create, mount, unmount, destroy
+
+Docker networks report the following events:
+
+    create, connect, disconnect, destroy
 
 **Example request**:
 
@@ -2085,10 +2301,48 @@ and Docker images report:
     HTTP/1.1 200 OK
     Content-Type: application/json
 
-    {"status":"pull","id":"busybox:latest","time":1442421700,"timeNano":1442421700598988358}
-    {"status":"create","id":"5745704abe9caa5","from":"busybox","time":1442421716,"timeNano":1442421716853979870}
-    {"status":"attach","id":"5745704abe9caa5","from":"busybox","time":1442421716,"timeNano":1442421716894759198}
-    {"status":"start","id":"5745704abe9caa5","from":"busybox","time":1442421716,"timeNano":1442421716983607193}
+    [
+	    {
+		"action": "pull",
+		"type": "image", 
+		"actor": {
+			"id": "busybox:latest",
+			"attributes": {}
+		}
+		"time": 1442421700,
+		"timeNano": 1442421700598988358
+	    },
+            {
+		"action": "create",
+		"type": "container",
+		"actor": {
+			"id": "5745704abe9caa5",
+			"attributes": {"image": "busybox"}
+		}
+		"time": 1442421716,
+		"timeNano": 1442421716853979870
+	    },
+            {
+		"action": "attach",
+		"type": "container",
+		"actor": {
+			"id": "5745704abe9caa5",
+			"attributes": {"image": "busybox"}
+		}
+		"time": 1442421716,
+		"timeNano": 1442421716894759198
+	    },
+            {
+		"action": "start",
+		"type": "container",
+		"actor": {
+			"id": "5745704abe9caa5",
+			"attributes": {"image": "busybox"}
+		}
+		"time": 1442421716,
+		"timeNano": 1442421716983607193
+	    }
+    ]
 
 Query Parameters:
 
@@ -2099,6 +2353,9 @@ Query Parameters:
   -   `event=<string>`; -- event to filter
   -   `image=<string>`; -- image to filter
   -   `label=<string>`; -- image and container label to filter
+  -   `type=<string>`; -- either `container` or `image` or `volume` or `network`
+  -   `volume=<string>`; -- volume to filter
+  -   `network=<string>`; -- network to filter
 
 Status Codes:
 
@@ -2222,6 +2479,7 @@ Sets up an exec instance in a running container `id`
        "AttachStdin": false,
        "AttachStdout": true,
        "AttachStderr": true,
+       "DetachKeys": "ctrl-p,ctrl-q",
        "Tty": false,
        "Cmd": [
                      "date"
@@ -2243,6 +2501,9 @@ Json Parameters:
 -   **AttachStdin** - Boolean value, attaches to `stdin` of the `exec` command.
 -   **AttachStdout** - Boolean value, attaches to `stdout` of the `exec` command.
 -   **AttachStderr** - Boolean value, attaches to `stderr` of the `exec` command.
+-   **Detacheys** – Override the key sequence for detaching a
+        container. Format is a single character `[a-Z]` or `ctrl-<value>`
+        where `<value>` is one of: `a-z`, `@`, `^`, `[`, `,` or `_`.
 -   **Tty** - Boolean value to allocate a pseudo-TTY.
 -   **Cmd** - Command to run specified as a string or an array of strings.
 
@@ -2251,6 +2512,8 @@ Status Codes:
 
 -   **201** – no error
 -   **404** – no such container
+-   **409** - container is paused
+-   **500** - server error
 
 ### Exec Start
 
@@ -2286,7 +2549,7 @@ Status Codes:
 
 -   **200** – no error
 -   **404** – no such exec instance
--   **409** - container is stopped or paused
+-   **409** - container is paused
 
     **Stream details**:
     Similar to the stream behavior of `POST /container/(id)/attach` API
@@ -2551,7 +2814,7 @@ Instruct the driver to remove the volume (`name`).
 
 **Example request**:
 
-    DELETE /volumes/local/tardis HTTP/1.1
+    DELETE /volumes/tardis HTTP/1.1
 
 **Example response**:
 
@@ -2572,7 +2835,7 @@ Status Codes
 
 **Example request**:
 
-    GET /networks HTTP/1.1
+    GET /networks?filters={"type":{"custom":true}} HTTP/1.1
 
 **Example response**:
 
@@ -2638,11 +2901,12 @@ Content-Type: application/json
 ]
 ```
 
-
-
 Query Parameters:
 
-- **filters** - JSON encoded value of the filters (a `map[string][]string`) to process on the networks list. Available filters: `name=[network-names]` , `id=[network-ids]`
+- **filters** - JSON encoded network list filter. The filter value is one of: 
+  -   `name=<network-name>` Matches all or part of a network name.
+  -   `id=<network-id>` Matches all or part of a network id.
+  -   `type=["custom"|"builtin"]` Filters networks by type. The `custom` keyword returns all user-defined networks.
 
 Status Codes:
 
@@ -2678,6 +2942,7 @@ Content-Type: application/json
   },
   "Containers": {
     "39b69226f9d79f5634485fb236a23b2fe4e96a0a94128390a7fbbcc167065867": {
+      "Name": "mad_mclean",
       "EndpointID": "ed2419a97c1d9954d05b46e462e7002ea552f216e9b136b80a7db8d98b442eda",
       "MacAddress": "02:42:ac:11:00:02",
       "IPv4Address": "172.17.0.2/16",
@@ -2744,13 +3009,13 @@ Content-Type: application/json
 Status Codes:
 
 - **201** - no error
-- **404** - driver not found
+- **404** - plugin not found
 - **500** - server error
 
 JSON Parameters:
 
 - **Name** - The new network's name. this is a mandatory field
-- **Driver** - Name of the network driver to use. Defaults to `bridge` driver
+- **Driver** - Name of the network driver plugin to use. Defaults to `bridge` driver
 - **IPAM** - Optional custom IP scheme for the network
 - **Options** - Network specific options to be used by the drivers
 - **CheckDuplicate** - Requests daemon to check for networks with same name
@@ -2778,8 +3043,9 @@ Content-Type: application/json
 
 Status Codes:
 
-- **201** - no error
+- **200** - no error
 - **404** - network or container is not found
+- **500** - Internal Server Error
 
 JSON Parameters:
 
@@ -2808,8 +3074,9 @@ Content-Type: application/json
 
 Status Codes:
 
-- **201** - no error
+- **200** - no error
 - **404** - network or container not found
+- **500** - Internal Server Error
 
 JSON Parameters:
 
@@ -2827,11 +3094,11 @@ Instruct the driver to remove the network (`id`).
 
 **Example response**:
 
-    HTTP/1.1 204 No Content
+    HTTP/1.1 200 OK
 
 Status Codes
 
--   **204** - no error
+-   **200** - no error
 -   **404** - no such network
 -   **500** - server error
 

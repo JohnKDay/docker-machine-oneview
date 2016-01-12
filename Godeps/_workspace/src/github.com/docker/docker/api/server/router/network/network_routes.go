@@ -7,12 +7,11 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api/server/httputils"
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/daemon"
-	"github.com/docker/docker/daemon/network"
-	"github.com/docker/docker/pkg/parsers/filters"
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/libnetwork"
 )
@@ -28,33 +27,24 @@ func (n *networkRouter) getNetworksList(ctx context.Context, w http.ResponseWrit
 		return err
 	}
 
+	if netFilters.Len() != 0 {
+		if err := netFilters.Validate(acceptedFilters); err != nil {
+			return err
+		}
+	}
+
 	list := []*types.NetworkResource{}
-	var nameFilter, idFilter bool
-	var names, ids []string
-	if names, nameFilter = netFilters["name"]; nameFilter {
-		for _, name := range names {
-			if nw, err := n.backend.GetNetwork(name, daemon.NetworkByName); err == nil {
-				list = append(list, buildNetworkResource(nw))
-			} else {
-				logrus.Errorf("failed to get network for filter=%s : %v", name, err)
-			}
-		}
+
+	nwList := n.backend.GetAllNetworks()
+	displayable, err := filterNetworks(nwList, netFilters)
+	if err != nil {
+		return err
 	}
 
-	if ids, idFilter = netFilters["id"]; idFilter {
-		for _, id := range ids {
-			for _, nw := range n.backend.GetNetworksByID(id) {
-				list = append(list, buildNetworkResource(nw))
-			}
-		}
+	for _, nw := range displayable {
+		list = append(list, buildNetworkResource(nw))
 	}
 
-	if !nameFilter && !idFilter {
-		nwList := n.backend.GetNetworksByID("")
-		for _, nw := range nwList {
-			list = append(list, buildNetworkResource(nw))
-		}
-	}
 	return httputils.WriteJSON(w, http.StatusOK, list)
 }
 
@@ -158,21 +148,7 @@ func (n *networkRouter) postNetworkDisconnect(ctx context.Context, w http.Respon
 }
 
 func (n *networkRouter) deleteNetwork(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	if err := httputils.ParseForm(r); err != nil {
-		return err
-	}
-
-	nw, err := n.backend.FindNetwork(vars["id"])
-	if err != nil {
-		return err
-	}
-
-	if runconfig.IsPreDefinedNetwork(nw.Name()) {
-		return httputils.WriteJSON(w, http.StatusForbidden,
-			fmt.Sprintf("%s is a pre-defined network and cannot be removed", nw.Name()))
-	}
-
-	return nw.Delete()
+	return n.backend.DeleteNetwork(vars["id"])
 }
 
 func buildNetworkResource(nw libnetwork.Network) *types.NetworkResource {
@@ -237,6 +213,7 @@ func buildEndpointResource(e libnetwork.Endpoint) types.EndpointResource {
 	}
 
 	er.EndpointID = e.ID()
+	er.Name = e.Name()
 	ei := e.Info()
 	if ei == nil {
 		return er

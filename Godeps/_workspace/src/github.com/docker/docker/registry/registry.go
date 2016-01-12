@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Sirupsen/logrus"
@@ -22,8 +23,8 @@ import (
 	"github.com/docker/distribution/registry/client/transport"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/pkg/parsers/kernel"
-	"github.com/docker/docker/pkg/tlsconfig"
 	"github.com/docker/docker/pkg/useragent"
+	"github.com/docker/go-connections/tlsconfig"
 )
 
 var (
@@ -61,7 +62,7 @@ func newTLSConfig(hostname string, isSecure bool) (*tls.Config, error) {
 
 	tlsConfig.InsecureSkipVerify = !isSecure
 
-	if isSecure {
+	if isSecure && CertsDir != "" {
 		hostDir := filepath.Join(CertsDir, cleanPath(hostname))
 		logrus.Debugf("hostDir: %s", hostDir)
 		if err := ReadCertsDirectory(&tlsConfig, hostDir); err != nil {
@@ -187,10 +188,10 @@ func addRequiredHeadersToRedirectedRequests(req *http.Request, via []*http.Reque
 	return nil
 }
 
-func shouldV2Fallback(err errcode.Error) bool {
-	logrus.Debugf("v2 error: %T %v", err, err)
+// ShouldV2Fallback returns true if this error is a reason to fall back to v1.
+func ShouldV2Fallback(err errcode.Error) bool {
 	switch err.Code {
-	case errcode.ErrorCodeUnauthorized, v2.ErrorCodeManifestUnknown:
+	case errcode.ErrorCodeUnauthorized, v2.ErrorCodeManifestUnknown, v2.ErrorCodeNameUnknown:
 		return true
 	}
 	return false
@@ -212,13 +213,18 @@ func (e ErrNoSupport) Error() string {
 func ContinueOnError(err error) bool {
 	switch v := err.(type) {
 	case errcode.Errors:
+		if len(v) == 0 {
+			return true
+		}
 		return ContinueOnError(v[0])
 	case ErrNoSupport:
 		return ContinueOnError(v.Err)
 	case errcode.Error:
-		return shouldV2Fallback(v)
+		return ShouldV2Fallback(v)
 	case *client.UnexpectedHTTPResponseError:
 		return true
+	case error:
+		return !strings.Contains(err.Error(), strings.ToLower(syscall.ENOSPC.Error()))
 	}
 	// let's be nice and fallback if the error is a completely
 	// unexpected one.

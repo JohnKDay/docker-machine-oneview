@@ -17,9 +17,11 @@ weight = -1
 
     Options:
       --api-cors-header=""                   Set CORS headers in the remote API
+      --authz-plugin=[]                     Set authorization plugins to load
       -b, --bridge=""                        Attach containers to a network bridge
       --bip=""                               Specify network bridge IP
-      -D, --debug=false                      Enable debug mode
+      --cgroup-parent=/docker                Set parent cgroup for all containers
+      -D, --debug                            Enable debug mode
       --default-gateway=""                   Container default gateway IPv4 address
       --default-gateway-v6=""                Container default gateway IPv6 address
       --cluster-store=""                     URL of the distributed storage backend
@@ -36,30 +38,30 @@ weight = -1
       -G, --group="docker"                   Group for the unix socket
       -g, --graph="/var/lib/docker"          Root of the Docker runtime
       -H, --host=[]                          Daemon socket(s) to connect to
-      --help=false                           Print usage
+      --help                                 Print usage
       --icc=true                             Enable inter-container communication
       --insecure-registry=[]                 Enable insecure registry communication
       --ip=0.0.0.0                           Default IP when binding container ports
       --ip-forward=true                      Enable net.ipv4.ip_forward
       --ip-masq=true                         Enable IP masquerading
       --iptables=true                        Enable addition of iptables rules
-      --ipv6=false                           Enable IPv6 networking
+      --ipv6                                 Enable IPv6 networking
       -l, --log-level="info"                 Set the logging level
       --label=[]                             Set key=value labels to the daemon
       --log-driver="json-file"               Default driver for container logs
       --log-opt=[]                           Log driver specific options
       --mtu=0                                Set the containers network MTU
-      --disable-legacy-registry=false        Do not contact legacy registries
+      --disable-legacy-registry              Do not contact legacy registries
       -p, --pidfile="/var/run/docker.pid"    Path to use for daemon PID file
       --registry-mirror=[]                   Preferred Docker registry mirror
       -s, --storage-driver=""                Storage driver to use
-      --selinux-enabled=false                Enable selinux support
+      --selinux-enabled                      Enable selinux support
       --storage-opt=[]                       Set storage driver options
-      --tls=false                            Use TLS; implied by --tlsverify
+      --tls                                  Use TLS; implied by --tlsverify
       --tlscacert="~/.docker/ca.pem"         Trust certs signed only by this CA
       --tlscert="~/.docker/cert.pem"         Path to TLS certificate file
       --tlskey="~/.docker/key.pem"           Path to TLS key file
-      --tlsverify=false                      Use TLS and verify the remote
+      --tlsverify                            Use TLS and verify the remote
       --userland-proxy=true                  Use userland proxy for loopback traffic
 
 Options with [] may be specified multiple times.
@@ -156,7 +158,7 @@ The `btrfs` driver is very fast for `docker build` - but like `devicemapper`
 does not share executable memory between devices. Use
 `docker daemon -s btrfs -g /mnt/btrfs_partition`.
 
-The `zfs` driver is probably not fast as `btrfs` but has a longer track record
+The `zfs` driver is probably not as fast as `btrfs` but has a longer track record
 on stability. Thanks to `Single Copy ARC` shared blocks between clones will be
 cached only once. Use `docker daemon -s zfs`. To select a different zfs filesystem
 set `zfs.fsname` option as described in [Storage driver options](#storage-driver-options).
@@ -260,11 +262,11 @@ options for `zfs` start with `zfs`.
 *  `dm.fs`
 
     Specifies the filesystem type to use for the base device. The supported
-    options are "ext4" and "xfs". The default is "ext4"
+    options are "ext4" and "xfs". The default is "xfs"
 
     Example use:
 
-        $ docker daemon --storage-opt dm.fs=xfs
+        $ docker daemon --storage-opt dm.fs=ext4
 
 *  `dm.mkfsarg`
 
@@ -446,13 +448,21 @@ single `native.cgroupdriver` option is available.
 
 The `native.cgroupdriver` option specifies the management of the container's
 cgroups. You can specify `cgroupfs` or `systemd`. If you specify `systemd` and
-it is not available, the system uses `cgroupfs`. By default, if no option is
-specified, the execdriver first tries `systemd` and falls back to `cgroupfs`.
-This example sets the execdriver to `cgroupfs`:
+it is not available, the system uses `cgroupfs`. If you omit the
+`native.cgroupdriver` option,` cgroupfs` is used.
+This example sets the `cgroupdriver` to `systemd`:
 
-    $ sudo docker daemon --exec-opt native.cgroupdriver=cgroupfs
+    $ sudo docker daemon --exec-opt native.cgroupdriver=systemd
 
 Setting this option applies to all containers the daemon launches.
+
+Also Windows Container makes use of `--exec-opt` for special purpose. Docker user
+can specify default container isolation technology with this, for example:
+
+    $ docker daemon --exec-opt isolation=hyperv
+
+Will make `hyperv` the default isolation technology on Windows, without specifying
+isolation value on daemon start, Windows isolation technology will default to `process`.
 
 ## Daemon DNS options
 
@@ -565,6 +575,18 @@ docker daemon \
 
 The currently supported cluster store options are:
 
+*  `discovery.heartbeat`
+
+    Specifies the heartbeat timer in seconds which is used by the daemon as a
+    keepalive mechanism to make sure discovery module treats the node as alive
+    in the cluster. If not configured, the default value is 20 seconds.
+
+*  `discovery.ttl`
+
+    Specifies the ttl (time-to-live) in seconds which is used by the discovery
+    module to timeout a node if a valid heartbeat is not received within the
+    configured ttl value. If not configured, the default value is 60 seconds.
+
 *  `kv.cacertfile`
 
     Specifies the path to a local file with PEM encoded CA certificates to trust
@@ -581,6 +603,30 @@ The currently supported cluster store options are:
     private key is used as the client key for communication with the
     Key/Value store.
 
+## Access authorization
+
+Docker's access authorization can be extended by authorization plugins that your
+organization can purchase or build themselves. You can install one or more
+authorization plugins when you start the Docker `daemon` using the
+`--authz-plugin=PLUGIN_ID` option.
+
+```bash
+docker daemon --authz-plugin=plugin1 --authz-plugin=plugin2,...
+```
+
+The `PLUGIN_ID` value is either the plugin's name or a path to its specification
+file. The plugin's implementation determines whether you can specify a name or
+path. Consult with your Docker administrator to get information about the
+plugins available to you.
+
+Once a plugin is installed, requests made to the `daemon` through the command
+line or Docker's remote API are allowed or denied by the plugin.  If you have
+multiple plugins installed, at least one must allow the request for it to
+complete.
+
+For information about how to create an authorization plugin, see [authorization
+plugin](../../extend/authorization.md) section in the Docker extend section of this documentation.
+
 
 ## Miscellaneous options
 
@@ -596,3 +642,22 @@ set like this:
     # or
     export DOCKER_TMPDIR=/mnt/disk2/tmp
     /usr/local/bin/docker daemon -D -g /var/lib/docker -H unix:// > /var/lib/docker-machine/docker.log 2>&1
+
+
+# Default cgroup parent
+
+The `--cgroup-parent` option allows you to set the default cgroup parent
+to use for containers. If this option is not set, it defaults to `/docker`.
+
+If the cgroup has a leading forward slash (`/`), the cgroup is created
+under the root cgroup, otherwise the cgroup is created under the daemon
+cgroup.
+
+Assuming the daemon is running in cgroup `daemoncgroup`,
+`--cgroup-parent=/foobar` creates a cgroup in
+`/sys/fs/cgroup/memory/foobar`, wheras using `--cgroup-parent=foobar`
+creates the cgroup in `/sys/fs/cgroup/memory/daemoncgroup/foobar`
+
+This setting can also be set per container, using the `--cgroup-parent`
+option on `docker create` and `docker run`, and takes precedence over
+the `--cgroup-parent` option on the daemon.

@@ -20,46 +20,21 @@ import (
 	"github.com/docker/docker/daemon/logger"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/opts"
+	"github.com/docker/docker/pkg/jsonlog"
 	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/pkg/pidfile"
 	"github.com/docker/docker/pkg/signal"
 	"github.com/docker/docker/pkg/system"
-	"github.com/docker/docker/pkg/timeutils"
-	"github.com/docker/docker/pkg/tlsconfig"
 	"github.com/docker/docker/registry"
 	"github.com/docker/docker/utils"
+	"github.com/docker/go-connections/tlsconfig"
 )
 
 const daemonUsage = "       docker daemon [ --help | ... ]\n"
 
 var (
-	flDaemon              = flag.Bool([]string{"#d", "#-daemon"}, false, "Enable daemon mode (deprecated; use docker daemon)")
 	daemonCli cli.Handler = NewDaemonCli()
 )
-
-// TODO: remove once `-d` is retired
-func handleGlobalDaemonFlag() {
-	// This block makes sure that if the deprecated daemon flag `--daemon` is absent,
-	// then all daemon-specific flags are absent as well.
-	if !*flDaemon && daemonFlags != nil {
-		flag.CommandLine.Visit(func(fl *flag.Flag) {
-			for _, name := range fl.Names {
-				name := strings.TrimPrefix(name, "#")
-				if daemonFlags.Lookup(name) != nil {
-					// daemon flag was NOT specified, but daemon-specific flags were
-					// so let's error out
-					fmt.Fprintf(os.Stderr, "docker: the daemon flag '-%s' must follow the 'docker daemon' command.\n", name)
-					os.Exit(1)
-				}
-			}
-		})
-	}
-
-	if *flDaemon {
-		daemonCli.(*DaemonCli).CmdDaemon(flag.Args()...)
-		os.Exit(0)
-	}
-}
 
 func presentInHelp(usage string) string { return usage }
 func absentFromHelp(string) string      { return "" }
@@ -154,10 +129,7 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 	// warn from uuid package when running the daemon
 	uuid.Loggerf = logrus.Warnf
 
-	if *flDaemon {
-		// allow legacy forms `docker -D -d` and `docker -d -D`
-		logrus.Warn("please use 'docker daemon' instead.")
-	} else if !commonFlags.FlagSet.IsEmpty() || !clientFlags.FlagSet.IsEmpty() {
+	if !commonFlags.FlagSet.IsEmpty() || !clientFlags.FlagSet.IsEmpty() {
 		// deny `docker -D daemon`
 		illegalFlag := getGlobalFlag()
 		fmt.Fprintf(os.Stderr, "invalid flag '-%s'.\nSee 'docker daemon --help'.\n", illegalFlag.Names[0])
@@ -178,7 +150,7 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 		logrus.Warn("Running experimental build")
 	}
 
-	logrus.SetFormatter(&logrus.TextFormatter{TimestampFormat: timeutils.RFC3339NanoFixed})
+	logrus.SetFormatter(&logrus.TextFormatter{TimestampFormat: jsonlog.RFC3339NanoFixed})
 
 	if err := setDefaultUmask(); err != nil {
 		logrus.Fatalf("Failed to set umask: %v", err)
@@ -205,8 +177,9 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 	}
 
 	serverConfig := &apiserver.Config{
-		Logging: true,
-		Version: dockerversion.Version,
+		AuthZPluginNames: cli.Config.AuthZPlugins,
+		Logging:          true,
+		Version:          dockerversion.Version,
 	}
 	serverConfig = setPlatformServerConfig(serverConfig, cli.Config)
 
@@ -245,21 +218,6 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 		logrus.Fatal(err)
 	}
 
-	// The serve API routine never exits unless an error occurs
-	// We need to start it as a goroutine and wait on it so
-	// daemon doesn't exit
-	// All servers must be protected with some mechanism (systemd socket, listenbuffer)
-	// which prevents real handling of request until routes will be set.
-	serveAPIWait := make(chan error)
-	go func() {
-		if err := api.ServeAPI(); err != nil {
-			logrus.Errorf("ServeAPI error: %v", err)
-			serveAPIWait <- err
-			return
-		}
-		serveAPIWait <- nil
-	}()
-
 	if err := migrateKey(); err != nil {
 		logrus.Fatal(err)
 	}
@@ -282,10 +240,23 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 		"version":     dockerversion.Version,
 		"commit":      dockerversion.GitCommit,
 		"execdriver":  d.ExecutionDriver().Name(),
-		"graphdriver": d.GraphDriver().String(),
+		"graphdriver": d.GraphDriverName(),
 	}).Info("Docker daemon")
 
 	api.InitRouters(d)
+
+	// The serve API routine never exits unless an error occurs
+	// We need to start it as a goroutine and wait on it so
+	// daemon doesn't exit
+	serveAPIWait := make(chan error)
+	go func() {
+		if err := api.ServeAPI(); err != nil {
+			logrus.Errorf("ServeAPI error: %v", err)
+			serveAPIWait <- err
+			return
+		}
+		serveAPIWait <- nil
+	}()
 
 	signal.Trap(func() {
 		api.Close()
@@ -298,10 +269,8 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 		}
 	})
 
-	// after the daemon is done setting up we can tell the api to start
-	// accepting connections with specified daemon
+	// after the daemon is done setting up we can notify systemd api
 	notifySystem()
-	api.AcceptConnections()
 
 	// Daemon is fully initialized and handling API traffic
 	// Wait for serve API to complete

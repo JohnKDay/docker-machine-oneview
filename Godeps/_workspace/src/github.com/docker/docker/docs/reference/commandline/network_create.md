@@ -17,7 +17,7 @@ parent = "smn_cli"
     --aux-address=map[]      Auxiliary ipv4 or ipv6 addresses used by network driver
     -d --driver=DRIVER       Driver to manage the Network bridge or overlay. The default is bridge.
     --gateway=[]             ipv4 or ipv6 Gateway for the master subnet
-    --help=false             Print usage
+    --help                   Print usage
     --ip-range=[]            Allocate container ip from a sub-range
     --ipam-driver=default    IP Address Management Driver
     -o --opt=map[]           Set custom network plugin options
@@ -116,7 +116,7 @@ docker network create -d overlay
   --ip-range=192.168.1.0/24
   --aux-address a=192.168.1.5 --aux-address b=192.168.1.6
   --aux-address a=192.170.1.5 --aux-address b=192.170.1.6
-  my-multihost-newtork
+  my-multihost-network
 ```
 Be sure that your subnetworks do not overlap. If they do, the network create fails and Engine returns an error.
 

@@ -19,17 +19,19 @@ clone git github.com/microsoft/hcsshim de43b42b5ce14dfdcbeedb0628b0032174d89caa
 clone git github.com/mistifyio/go-zfs v2.1.1
 clone git github.com/tchap/go-patricia v2.1.0
 clone git github.com/vdemeester/shakers 3c10293ce22b900c27acad7b28656196fcc2f73b
-clone git golang.org/x/net 3cffabab72adf04f8e3b01c5baf775361837b5fe https://github.com/golang/net.git
+clone git golang.org/x/net 47990a1ba55743e6ef1affd3a14e5bac8553615d https://github.com/golang/net.git
+clone git github.com/docker/go-units 651fc226e7441360384da338d0fd37f2440ffbe3
+clone git github.com/docker/go-connections 4e42727957c146776e5de9cec8c39e4059ed9f20
 
 #get libnetwork packages
-clone git github.com/docker/libnetwork 5305ea570b85d61dd0fd261cd7e1680da1884678
+clone git github.com/docker/libnetwork 9f0563ea8f430d8828553aac97161cbff4056436
 clone git github.com/armon/go-metrics eb0af217e5e9747e41dd5303755356b62d28e3ec
 clone git github.com/hashicorp/go-msgpack 71c2886f5a673a35f909803f38ece5810165097b
 clone git github.com/hashicorp/memberlist 9a1e242e454d2443df330bdd51a436d5a9058fc4
 clone git github.com/hashicorp/serf 7151adcef72687bf95f451a2e0ba15cb19412bf2
 clone git github.com/docker/libkv c2aac5dbbaa5c872211edea7c0f32b3bd67e7410
 clone git github.com/vishvananda/netns 604eaf189ee867d8c147fafc28def2394e878d25
-clone git github.com/vishvananda/netlink 4b5dce31de6d42af5bb9811c6d265472199e0fec
+clone git github.com/vishvananda/netlink 8e810149a2e531fed9b837c0c7d8a8922d2bedf7
 clone git github.com/BurntSushi/toml f706d00e3de6abe700c994cdd545a1a4915af060
 clone git github.com/samuel/go-zookeeper d0e0d8e11f318e000a8cc434616d69e329edc374
 clone git github.com/deckarep/golang-set ef32fa3046d9f249d399f98ebaf9be944430fd1d
@@ -40,22 +42,25 @@ clone git github.com/hashicorp/consul v0.5.2
 clone git github.com/boltdb/bolt v1.1.0
 
 # get graph and distribution packages
-clone git github.com/docker/distribution c6c9194e9c6097f84b0ff468a741086ff7704aa3
-clone git github.com/vbatts/tar-split v0.9.10
+clone git github.com/docker/distribution 568bf038af6d65b376165d02886b1c7fcaef1f61
+clone git github.com/vbatts/tar-split v0.9.11
 
-clone git github.com/docker/notary 089d8450d8928aa1c58fd03f09cabbde9bcb4590
-clone git github.com/endophage/gotuf 2df1c8e0a7b7e10ae2113bf37aaa1bf1c1de8cc5
+clone git github.com/docker/notary 45de2828b5e0083bfb4e9a5a781eddb05e2ef9d0
+clone git google.golang.org/grpc 174192fc93efcb188fc8f46ca447f0da606b6885 https://github.com/grpc/grpc-go.git
+clone git github.com/miekg/pkcs11 80f102b5cac759de406949c47f0928b99bd64cdf
 clone git github.com/jfrazelle/go v1.5.1-1
 clone git github.com/agl/ed25519 d2b94fd789ea21d12fac1a4443dd3a3f79cda72c
 
-# this runc commit from branch relabel_fix_docker_1.9.1, pls remove it when you
-# update next time
-clone git github.com/opencontainers/runc 1349b37bd56f4f5ce2690b5b2c0f53f88a261c67 # libcontainer
+clone git github.com/opencontainers/runc ba1568de399395774ad84c2ace65937814c542ed # libcontainer
+clone git github.com/opencontainers/specs 46d949ea81080c5f60dfb72ee91468b1e9fb2998 # specs
+clone git github.com/seccomp/libseccomp-golang 1b506fc7c24eec5a3693cdcbed40d9c226cfc6a1
 # libcontainer deps (see src/github.com/opencontainers/runc/Godeps/Godeps.json)
-clone git github.com/coreos/go-systemd v3
-clone git github.com/godbus/dbus v2
-clone git github.com/syndtr/gocapability 66ef2aa7a23ba682594e2b6f74cf40c0692b49fb
-clone git github.com/golang/protobuf 655cdfa588ea
+clone git github.com/coreos/go-systemd v4
+clone git github.com/godbus/dbus v3
+clone git github.com/syndtr/gocapability 2c00daeb6c3b45114c80ac44119e7b8801fdd852
+clone git github.com/golang/protobuf f7137ae6b19afbfd61a94b746fda3b3fe0491874
+
+# gelf logging driver deps
 clone git github.com/Graylog2/go-gelf 6c62a85f1d47a67f2a5144c0e745b325889a8120
 
 clone git github.com/fluent/fluent-logger-golang v1.0.0

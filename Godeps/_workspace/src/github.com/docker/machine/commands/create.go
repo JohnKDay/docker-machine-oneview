@@ -12,9 +12,8 @@ import (
 
 	"errors"
 
-	"github.com/docker/machine/cli"
+	"github.com/codegangsta/cli"
 	"github.com/docker/machine/commands/mcndirs"
-	"github.com/docker/machine/drivers/errdriver"
 	"github.com/docker/machine/libmachine"
 	"github.com/docker/machine/libmachine/auth"
 	"github.com/docker/machine/libmachine/drivers"
@@ -24,7 +23,6 @@ import (
 	"github.com/docker/machine/libmachine/log"
 	"github.com/docker/machine/libmachine/mcnerror"
 	"github.com/docker/machine/libmachine/mcnflag"
-	"github.com/docker/machine/libmachine/persist"
 	"github.com/docker/machine/libmachine/swarm"
 )
 
@@ -115,26 +113,20 @@ var (
 			Usage: "addr to advertise for Swarm (default: detect and use the machine IP)",
 			Value: "",
 		},
+		cli.StringSliceFlag{
+			Name:  "tls-san",
+			Usage: "Support extra SANs for TLS certs",
+			Value: &cli.StringSlice{},
+		},
 	}
 )
 
-func cmdCreateInner(c CommandLine) error {
+func cmdCreateInner(c CommandLine, api libmachine.API) error {
 	if len(c.Args()) > 1 {
 		return fmt.Errorf("Invalid command line. Found extra arguments %v", c.Args()[1:])
 	}
 
 	name := c.Args().First()
-	driverName := c.String("driver")
-	certInfo := getCertPathInfoFromContext(c)
-
-	storePath := c.GlobalString("storage-path")
-
-	store := &persist.Filestore{
-		Path:             storePath,
-		CaCertPath:       certInfo.CaCertPath,
-		CaPrivateKeyPath: certInfo.CaPrivateKeyPath,
-	}
-
 	if name == "" {
 		c.ShowHelp()
 		return errNoMachineName
@@ -150,7 +142,7 @@ func cmdCreateInner(c CommandLine) error {
 	}
 
 	// TODO: Fix hacky JSON solution
-	bareDriverData, err := json.Marshal(&drivers.BaseDriver{
+	rawDriver, err := json.Marshal(&drivers.BaseDriver{
 		MachineName: name,
 		StorePath:   c.GlobalString("storage-path"),
 	})
@@ -158,12 +150,8 @@ func cmdCreateInner(c CommandLine) error {
 		return fmt.Errorf("Error attempting to marshal bare driver data: %s", err)
 	}
 
-	driver, err := newPluginDriver(driverName, bareDriverData)
-	if err != nil {
-		return fmt.Errorf("Error loading driver %q: %s", driverName, err)
-	}
-
-	h, err := store.NewHost(driver)
+	driverName := c.String("driver")
+	h, err := api.NewHost(driverName, rawDriver)
 	if err != nil {
 		return fmt.Errorf("Error getting new host: %s", err)
 	}
@@ -171,13 +159,14 @@ func cmdCreateInner(c CommandLine) error {
 	h.HostOptions = &host.Options{
 		AuthOptions: &auth.Options{
 			CertDir:          mcndirs.GetMachineCertDir(),
-			CaCertPath:       certInfo.CaCertPath,
-			CaPrivateKeyPath: certInfo.CaPrivateKeyPath,
-			ClientCertPath:   certInfo.ClientCertPath,
-			ClientKeyPath:    certInfo.ClientKeyPath,
+			CaCertPath:       tlsPath(c, "tls-ca-cert", "ca.pem"),
+			CaPrivateKeyPath: tlsPath(c, "tls-ca-key", "ca-key.pem"),
+			ClientCertPath:   tlsPath(c, "tls-client-cert", "cert.pem"),
+			ClientKeyPath:    tlsPath(c, "tls-client-key", "key.pem"),
 			ServerCertPath:   filepath.Join(mcndirs.GetMachineDir(), name, "server.pem"),
 			ServerKeyPath:    filepath.Join(mcndirs.GetMachineDir(), name, "server-key.pem"),
 			StorePath:        filepath.Join(mcndirs.GetMachineDir(), name),
+			ServerCertSANs:   c.StringSlice("tls-san"),
 		},
 		EngineOptions: &engine.Options{
 			ArbitraryFlags:   c.StringSlice("engine-opt"),
@@ -201,7 +190,7 @@ func cmdCreateInner(c CommandLine) error {
 		},
 	}
 
-	exists, err := store.Exists(h.Name)
+	exists, err := api.Exists(h.Name)
 	if err != nil {
 		return fmt.Errorf("Error checking if host exists: %s", err)
 	}
@@ -214,18 +203,18 @@ func cmdCreateInner(c CommandLine) error {
 	// driverOpts is the actual data we send over the wire to set the
 	// driver parameters (an interface fulfilling drivers.DriverOptions,
 	// concrete type rpcdriver.RpcFlags).
-	mcnFlags := driver.GetCreateFlags()
+	mcnFlags := h.Driver.GetCreateFlags()
 	driverOpts := getDriverOpts(c, mcnFlags)
 
 	if err := h.Driver.SetConfigFromFlags(driverOpts); err != nil {
 		return fmt.Errorf("Error setting machine configuration from flags provided: %s", err)
 	}
 
-	if err := libmachine.Create(store, h); err != nil {
+	if err := api.Create(h); err != nil {
 		return fmt.Errorf("Error creating machine: %s", err)
 	}
 
-	if err := saveHost(store, h); err != nil {
+	if err := api.Save(h); err != nil {
 		return fmt.Errorf("Error attempting to save store: %s", err)
 	}
 
@@ -270,33 +259,29 @@ func flagHackLookup(flagName string) string {
 	return ""
 }
 
-func cmdCreateOuter(c CommandLine) error {
+func cmdCreateOuter(c CommandLine, api libmachine.API) error {
 	const (
 		flagLookupMachineName = "flag-lookup"
 	)
-	driverName := flagHackLookup("--driver")
 
 	// We didn't recognize the driver name.
+	driverName := flagHackLookup("--driver")
 	if driverName == "" {
 		c.ShowHelp()
 		return nil // ?
 	}
 
 	// TODO: Fix hacky JSON solution
-	bareDriverData, err := json.Marshal(&drivers.BaseDriver{
+	rawDriver, err := json.Marshal(&drivers.BaseDriver{
 		MachineName: flagLookupMachineName,
 	})
 	if err != nil {
 		return fmt.Errorf("Error attempting to marshal bare driver data: %s", err)
 	}
 
-	driver, err := newPluginDriver(driverName, bareDriverData)
+	h, err := api.NewHost(driverName, rawDriver)
 	if err != nil {
-		return fmt.Errorf("Error loading driver %q: %s", driverName, err)
-	}
-
-	if _, ok := driver.(*errdriver.Driver); ok {
-		return errdriver.ErrDriverNotLoadable{driverName}
+		return err
 	}
 
 	// TODO: So much flag manipulation and voodoo here, it seems to be
@@ -304,7 +289,7 @@ func cmdCreateOuter(c CommandLine) error {
 	//
 	// mcnFlags is the data we get back over the wire (type mcnflag.Flag)
 	// to indicate which parameters are available.
-	mcnFlags := driver.GetCreateFlags()
+	mcnFlags := h.Driver.GetCreateFlags()
 
 	// This bit will actually make "create" display the correct flags based
 	// on the requested driver.
@@ -320,16 +305,6 @@ func cmdCreateOuter(c CommandLine) error {
 		}
 	}
 
-	if serialDriver, ok := driver.(*drivers.SerialDriver); ok {
-		driver = serialDriver.Driver
-	}
-
-	if rpcd, ok := driver.(*rpcdriver.RpcClientDriver); ok {
-		if err := rpcd.Close(); err != nil {
-			return err
-		}
-	}
-
 	return c.Application().Run(os.Args)
 }
 
@@ -340,7 +315,7 @@ func getDriverOpts(c CommandLine, mcnflags []mcnflag.Flag) drivers.DriverOptions
 	// But, we need it so that we can actually send the flags for creating
 	// a machine over the wire (cli.Context is a no go since there is so
 	// much stuff in it).
-	driverOpts := rpcdriver.RpcFlags{
+	driverOpts := rpcdriver.RPCFlags{
 		Values: make(map[string]interface{}),
 	}
 
@@ -355,14 +330,14 @@ func getDriverOpts(c CommandLine, mcnflags []mcnflag.Flag) drivers.DriverOptions
 
 	for _, name := range c.FlagNames() {
 		getter, ok := c.Generic(name).(flag.Getter)
-		if !ok {
+		if ok {
+			driverOpts.Values[name] = getter.Get()
+		} else {
 			// TODO: This is pretty hacky.  StringSlice is the only
 			// type so far we have to worry about which is not a
 			// Getter, though.
 			driverOpts.Values[name] = c.StringSlice(name)
-			continue
 		}
-		driverOpts.Values[name] = getter.Get()
 	}
 
 	return driverOpts
@@ -441,4 +416,13 @@ func validateSwarmDiscovery(discovery string) error {
 	}
 
 	return fmt.Errorf("Swarm Discovery URL was in the wrong format: %s", discovery)
+}
+
+func tlsPath(c CommandLine, flag string, defaultName string) string {
+	path := c.GlobalString(flag)
+	if path != "" {
+		return path
+	}
+
+	return filepath.Join(mcndirs.GetMachineCertDir(), defaultName)
 }

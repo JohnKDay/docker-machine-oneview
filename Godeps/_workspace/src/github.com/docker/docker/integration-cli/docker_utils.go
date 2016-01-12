@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,9 +27,9 @@ import (
 	"github.com/docker/docker/pkg/httputils"
 	"github.com/docker/docker/pkg/integration"
 	"github.com/docker/docker/pkg/ioutils"
-	"github.com/docker/docker/pkg/sockets"
 	"github.com/docker/docker/pkg/stringutils"
-	"github.com/docker/docker/pkg/tlsconfig"
+	"github.com/docker/go-connections/sockets"
+	"github.com/docker/go-connections/tlsconfig"
 	"github.com/go-check/check"
 )
 
@@ -320,11 +321,11 @@ func (d *Daemon) StartWithBusybox(arg ...string) error {
 		}
 	}
 	// loading busybox image to this daemon
-	if _, err := d.Cmd("load", "--input", bb); err != nil {
-		return fmt.Errorf("could not load busybox image: %v", err)
+	if out, err := d.Cmd("load", "--input", bb); err != nil {
+		return fmt.Errorf("could not load busybox image: %s", out)
 	}
 	if err := os.Remove(bb); err != nil {
-		d.c.Logf("Could not remove %s: %v", bb, err)
+		d.c.Logf("could not remove %s: %v", bb, err)
 	}
 	return nil
 }
@@ -481,6 +482,26 @@ func daemonHost() string {
 	return daemonURLStr
 }
 
+func getTLSConfig() (*tls.Config, error) {
+	dockerCertPath := os.Getenv("DOCKER_CERT_PATH")
+
+	if dockerCertPath == "" {
+		return nil, fmt.Errorf("DOCKER_TLS_VERIFY specified, but no DOCKER_CERT_PATH environment variable")
+	}
+
+	option := &tlsconfig.Options{
+		CAFile:   filepath.Join(dockerCertPath, "ca.pem"),
+		CertFile: filepath.Join(dockerCertPath, "cert.pem"),
+		KeyFile:  filepath.Join(dockerCertPath, "key.pem"),
+	}
+	tlsConfig, err := tlsconfig.Client(*option)
+	if err != nil {
+		return nil, err
+	}
+
+	return tlsConfig, nil
+}
+
 func sockConn(timeout time.Duration) (net.Conn, error) {
 	daemon := daemonHost()
 	daemonURL, err := url.Parse(daemon)
@@ -493,6 +514,15 @@ func sockConn(timeout time.Duration) (net.Conn, error) {
 	case "unix":
 		return net.DialTimeout(daemonURL.Scheme, daemonURL.Path, timeout)
 	case "tcp":
+		if os.Getenv("DOCKER_TLS_VERIFY") != "" {
+			// Setup the socket TLS configuration.
+			tlsConfig, err := getTLSConfig()
+			if err != nil {
+				return nil, err
+			}
+			dialer := &net.Dialer{Timeout: timeout}
+			return tls.DialWithDialer(dialer, daemonURL.Scheme, daemonURL.Host, tlsConfig)
+		}
 		return net.DialTimeout(daemonURL.Scheme, daemonURL.Host, timeout)
 	default:
 		return c, fmt.Errorf("unknown scheme %v (%s)", daemonURL.Scheme, daemon)
@@ -597,8 +627,10 @@ func deleteAllContainers() error {
 		return err
 	}
 
-	if err = deleteContainer(containers); err != nil {
-		return err
+	if containers != "" {
+		if err = deleteContainer(containers); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1276,6 +1308,47 @@ func buildImageFromContextWithOut(name string, ctx *FakeContext, useCache bool, 
 	return id, out, nil
 }
 
+func buildImageFromContextWithStdoutStderr(name string, ctx *FakeContext, useCache bool, buildFlags ...string) (string, string, string, error) {
+	args := []string{"build", "-t", name}
+	if !useCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args, buildFlags...)
+	args = append(args, ".")
+	buildCmd := exec.Command(dockerBinary, args...)
+	buildCmd.Dir = ctx.Dir
+
+	stdout, stderr, exitCode, err := runCommandWithStdoutStderr(buildCmd)
+	if err != nil || exitCode != 0 {
+		return "", stdout, stderr, fmt.Errorf("failed to build the image: %s", stdout)
+	}
+	id, err := getIDByName(name)
+	if err != nil {
+		return "", stdout, stderr, err
+	}
+	return id, stdout, stderr, nil
+}
+
+func buildImageFromGitWithStdoutStderr(name string, ctx *fakeGit, useCache bool, buildFlags ...string) (string, string, string, error) {
+	args := []string{"build", "-t", name}
+	if !useCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args, buildFlags...)
+	args = append(args, ctx.RepoURL)
+	buildCmd := exec.Command(dockerBinary, args...)
+
+	stdout, stderr, exitCode, err := runCommandWithStdoutStderr(buildCmd)
+	if err != nil || exitCode != 0 {
+		return "", stdout, stderr, fmt.Errorf("failed to build the image: %s", stdout)
+	}
+	id, err := getIDByName(name)
+	if err != nil {
+		return "", stdout, stderr, err
+	}
+	return id, stdout, stderr, nil
+}
+
 func buildImageFromPath(name, path string, useCache bool, buildFlags ...string) (string, error) {
 	args := []string{"build", "-t", name}
 	if !useCache {
@@ -1384,7 +1457,7 @@ func newFakeGit(name string, files map[string]string, enforceLocalServer bool) (
 			return nil, fmt.Errorf("cannot start fake storage: %v", err)
 		}
 	} else {
-		// always start a local http server on CLI test machin
+		// always start a local http server on CLI test machine
 		httpServer := httptest.NewServer(http.FileServer(http.Dir(root)))
 		server = &localGitServer{httpServer}
 	}
@@ -1398,7 +1471,7 @@ func newFakeGit(name string, files map[string]string, enforceLocalServer bool) (
 // Write `content` to the file at path `dst`, creating it if necessary,
 // as well as any missing directories.
 // The file is truncated if it already exists.
-// Fail the test when error occures.
+// Fail the test when error occurs.
 func writeFile(dst, content string, c *check.C) {
 	// Create subdirectories if necessary
 	c.Assert(os.MkdirAll(path.Dir(dst), 0700), check.IsNil)
@@ -1411,7 +1484,7 @@ func writeFile(dst, content string, c *check.C) {
 }
 
 // Return the contents of file at path `src`.
-// Fail the test when error occures.
+// Fail the test when error occurs.
 func readFile(src string, c *check.C) (content string) {
 	data, err := ioutil.ReadFile(src)
 	c.Assert(err, check.IsNil)
@@ -1487,7 +1560,7 @@ func setupRegistry(c *check.C) *testRegistryV2 {
 	c.Assert(err, check.IsNil)
 
 	// Wait for registry to be ready to serve requests.
-	for i := 0; i != 5; i++ {
+	for i := 0; i != 50; i++ {
 		if err = reg.Ping(); err == nil {
 			break
 		}

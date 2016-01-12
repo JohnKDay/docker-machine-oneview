@@ -2,6 +2,7 @@ package google
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/docker/machine/libmachine/drivers"
@@ -25,13 +26,14 @@ type Driver struct {
 	DiskSize      int
 	Project       string
 	Tags          string
+	UseExisting   bool
 }
 
 const (
 	defaultZone        = "us-central1-a"
 	defaultUser        = "docker-user"
 	defaultMachineType = "n1-standard-1"
-	defaultImageName   = "https://www.googleapis.com/compute/v1/projects/ubuntu-os-cloud/global/images/ubuntu-1404-trusty-v20150909a"
+	defaultImageName   = "https://www.googleapis.com/compute/v1/projects/ubuntu-os-cloud/global/images/ubuntu-1510-wily-v20151114"
 	defaultScopes      = "https://www.googleapis.com/auth/devstorage.read_only,https://www.googleapis.com/auth/logging.write"
 	defaultDiskType    = "pd-standard"
 	defaultDiskSize    = 10
@@ -109,6 +111,11 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Usage:  "Use internal GCE Instance IP rather than public one",
 			EnvVar: "GOOGLE_USE_INTERNAL_IP",
 		},
+		mcnflag.BoolFlag{
+			Name:   "google-use-existing",
+			Usage:  "Don't create a new VM, use an existing one",
+			EnvVar: "GOOGLE_USE_EXISTING",
+		},
 	}
 }
 
@@ -142,7 +149,7 @@ func (d *Driver) GetSSHUsername() string {
 	return d.SSHUser
 }
 
-// DriverName returns the name of the driver.
+// DriverName returns the name of the driver
 func (d *Driver) DriverName() string {
 	return "google"
 }
@@ -155,20 +162,21 @@ func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 	}
 
 	d.Zone = flags.String("google-zone")
-	d.MachineType = flags.String("google-machine-type")
-	d.MachineImage = flags.String("google-machine-image")
-	d.DiskSize = flags.Int("google-disk-size")
-	d.DiskType = flags.String("google-disk-type")
-	d.Address = flags.String("google-address")
-	d.Preemptible = flags.Bool("google-preemptible")
-	d.UseInternalIP = flags.Bool("google-use-internal-ip")
-	d.Scopes = flags.String("google-scopes")
-	d.Tags = flags.String("google-tags")
-	d.SwarmMaster = flags.Bool("swarm-master")
-	d.SwarmHost = flags.String("swarm-host")
-	d.SwarmDiscovery = flags.String("swarm-discovery")
+	d.UseExisting = flags.Bool("google-use-existing")
+	if !d.UseExisting {
+		d.MachineType = flags.String("google-machine-type")
+		d.MachineImage = flags.String("google-machine-image")
+		d.DiskSize = flags.Int("google-disk-size")
+		d.DiskType = flags.String("google-disk-type")
+		d.Address = flags.String("google-address")
+		d.Preemptible = flags.Bool("google-preemptible")
+		d.UseInternalIP = flags.Bool("google-use-internal-ip")
+		d.Scopes = flags.String("google-scopes")
+		d.Tags = flags.String("google-tags")
+	}
 	d.SSHUser = flags.String("google-username")
 	d.SSHPort = 22
+	d.SetSwarmConfigFromFlags(flags)
 
 	return nil
 }
@@ -180,7 +188,7 @@ func (d *Driver) PreCreateCheck() error {
 		return err
 	}
 
-	// Check that the project exists. It will also check that credentials
+	// Check that the project exists. It will also check the credentials
 	// at the same time.
 	log.Infof("Check that the project exists")
 
@@ -192,8 +200,15 @@ func (d *Driver) PreCreateCheck() error {
 	// doesn't exist, so just check instance for nil.
 	log.Infof("Check if the instance already exists")
 
-	if instance, _ := c.instance(); instance != nil {
-		return fmt.Errorf("Instance %v already exists.", d.MachineName)
+	instance, _ := c.instance()
+	if d.UseExisting {
+		if instance == nil {
+			return fmt.Errorf("Unable to find instance %q in zone %q.", d.MachineName, d.Zone)
+		}
+	} else {
+		if instance != nil {
+			return fmt.Errorf("Instance %q already exists in zone %q.", d.MachineName, d.Zone)
+		}
 	}
 
 	return nil
@@ -214,6 +229,13 @@ func (d *Driver) Create() error {
 		return err
 	}
 
+	if err := c.openFirewallPorts(); err != nil {
+		return err
+	}
+
+	if d.UseExisting {
+		return c.configureInstance(d)
+	}
 	return c.createInstance(d)
 }
 
@@ -223,8 +245,8 @@ func (d *Driver) GetURL() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	url := fmt.Sprintf("tcp://%s:2376", ip)
-	return url, nil
+
+	return fmt.Sprintf("tcp://%s", net.JoinHostPort(ip, "2376")), nil
 }
 
 // GetIP returns the IP address of the GCE instance.
@@ -233,7 +255,16 @@ func (d *Driver) GetIP() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return c.ip()
+
+	ip, err := c.ip()
+	if err != nil {
+		return "", err
+	}
+	if ip == "" {
+		return "", drivers.ErrHostIsNotRunning
+	}
+
+	return ip, nil
 }
 
 // GetState returns a docker.hosts.state.State value representing the current state of the host.
@@ -245,12 +276,12 @@ func (d *Driver) GetState() (state.State, error) {
 
 	// All we care about is whether the disk exists, so we just check disk for a nil value.
 	// There will be no error if disk is not nil.
-	disk, _ := c.disk()
 	instance, _ := c.instance()
-	if instance == nil && disk == nil {
-		return state.None, nil
-	}
-	if instance == nil && disk != nil {
+	if instance == nil {
+		disk, _ := c.disk()
+		if disk == nil {
+			return state.None, nil
+		}
 		return state.Stopped, nil
 	}
 
@@ -308,6 +339,15 @@ func (d *Driver) Stop() error {
 	return nil
 }
 
+// Restart restarts a machine which is known to be running.
+func (d *Driver) Restart() error {
+	if err := d.Stop(); err != nil {
+		return err
+	}
+
+	return d.Start()
+}
+
 // Kill stops an existing GCE instance.
 func (d *Driver) Kill() error {
 	return d.Stop()
@@ -319,6 +359,7 @@ func (d *Driver) Remove() error {
 	if err != nil {
 		return err
 	}
+
 	s, err := d.GetState()
 	if err != nil {
 		return err
@@ -329,8 +370,4 @@ func (d *Driver) Remove() error {
 		}
 	}
 	return c.deleteDisk()
-}
-
-func (d *Driver) Restart() error {
-	return nil
 }

@@ -6,16 +6,17 @@ import (
 	"os"
 	"path/filepath"
 
+	containertypes "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/container"
 	derr "github.com/docker/docker/errors"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/stringid"
-	"github.com/docker/docker/runconfig"
 	"github.com/docker/docker/volume"
 	"github.com/opencontainers/runc/libcontainer/label"
 )
 
 // createContainerPlatformSpecificSettings performs platform specific container create functionality
-func (daemon *Daemon) createContainerPlatformSpecificSettings(container *Container, config *runconfig.Config, hostConfig *runconfig.HostConfig, img *image.Image) error {
+func (daemon *Daemon) createContainerPlatformSpecificSettings(container *container.Container, config *containertypes.Config, hostConfig *containertypes.HostConfig, img *image.Image) error {
 	if err := daemon.Mount(container); err != nil {
 		return err
 	}
@@ -27,7 +28,7 @@ func (daemon *Daemon) createContainerPlatformSpecificSettings(container *Contain
 
 		// Skip volumes for which we already have something mounted on that
 		// destination because of a --volume-from.
-		if container.isDestinationMounted(destination) {
+		if container.IsDestinationMounted(destination) {
 			continue
 		}
 		path, err := container.GetResourcePath(destination)
@@ -50,7 +51,7 @@ func (daemon *Daemon) createContainerPlatformSpecificSettings(container *Contain
 			}
 		}
 
-		v, err := daemon.createVolume(name, volumeDriver, nil)
+		v, err := daemon.volumes.CreateWithRef(name, volumeDriver, container.ID, nil)
 		if err != nil {
 			return err
 		}
@@ -61,12 +62,12 @@ func (daemon *Daemon) createContainerPlatformSpecificSettings(container *Contain
 
 		// never attempt to copy existing content in a container FS to a shared volume
 		if v.DriverName() == volume.DefaultDriverName {
-			if err := container.copyImagePathContent(v, destination); err != nil {
+			if err := container.CopyImagePathContent(v, destination); err != nil {
 				return err
 			}
 		}
 
-		container.addMountPointWithVolume(destination, v, true)
+		container.AddMountPointWithVolume(destination, v, true)
 	}
 	return nil
 }

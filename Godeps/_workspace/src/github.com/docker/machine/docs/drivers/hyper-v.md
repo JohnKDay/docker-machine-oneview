@@ -9,6 +9,7 @@ parent="smn_machine_drivers"
 <![end-metadata]-->
 
 # Microsoft Hyper-V
+
 Creates a Boot2Docker virtual machine locally on your Windows machine
 using Hyper-V. [See here](http://windows.microsoft.com/en-us/windows-8/hyper-v-run-virtual-machines)
 for instructions to enable Hyper-V. You will need to use an
@@ -23,18 +24,18 @@ Administrator level account to create and manage Hyper-V machines.
 
 Options:
 
- - `--hyper-v-boot2docker-url`: The URL of the boot2docker ISO. Defaults to the latest available version.
- - `--hyper-v-boot2docker-location`: Location of a local boot2docker iso to use. Overrides the URL option below.
- - `--hyper-v-virtual-switch`: Name of the virtual switch to use. Defaults to first found.
- - `--hyper-v-disk-size`: Size of disk for the host in MB.
- - `--hyper-v-memory`: Size of memory for the host in MB. By default, the machine is setup to use dynamic memory.
+-   `--hyperv-boot2docker-url`: The URL of the boot2docker ISO.
+-   `--hyperv-virtual-switch`: Name of the virtual switch to use.
+-   `--hyperv-disk-size`: Size of disk for the host in MB.
+-   `--hyperv-memory`: Size of memory for the host in MB.
+-   `--hyperv-cpu-count`: Number of CPUs for the host.
 
 Environment variables and default values:
 
-| CLI option                       | Environment variable | Default                  |
-|----------------------------------|----------------------| -------------------------|
-| `--hyper-v-boot2docker-url`      | -                    | *Latest boot2docker url* |
-| `--hyper-v-boot2docker-location` | -                    | -                        |
-| `--hyper-v-virtual-switch`       | -                    | *first found*            |
-| `--hyper-v-disk-size`            | -                    | `20000`                  |
-| `--hyper-v-memory`               | -                    | `1024`                   |
+| CLI option                 | Environment variable     | Default                  |
+| -------------------------- | ------------------------ | ------------------------ |
+| `--hyperv-boot2docker-url` | `HYPERV_BOOT2DOCKER_URL` | _Latest boot2docker url_ |
+| `--hyperv-virtual-switch`  | `HYPERV_VIRTUAL_SWITCH`  | _first found_            |
+| `--hyperv-disk-size`       | `HYPERV_DISK_SIZE`       | `20000`                  |
+| `--hyperv-memory`          | `HYPERV_MEMORY`          | `1024`                   |
+| `--hyperv-cpu-count`       | `HYPERV_CPU_COUNT`       | `1`                      |

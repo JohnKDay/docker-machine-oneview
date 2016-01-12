@@ -121,21 +121,19 @@ type driverData struct {
 }
 
 type ipamData struct {
-	driver ipamapi.Ipam
+	driver     ipamapi.Ipam
+	capability *ipamapi.Capability
 	// default address spaces are provided by ipam driver at registration time
 	defaultLocalAddressSpace, defaultGlobalAddressSpace string
 }
 
 type driverTable map[string]*driverData
 
-//type networkTable map[string]*network
-//type endpointTable map[string]*endpoint
 type ipamTable map[string]*ipamData
 type sandboxTable map[string]*sandbox
 
 type controller struct {
-	id string
-	//networks       networkTable
+	id             string
 	drivers        driverTable
 	ipamDrivers    ipamTable
 	sandboxes      sandboxTable
@@ -309,7 +307,7 @@ func (c *controller) RegisterDriver(networkType string, driver driverapi.Driver,
 	return nil
 }
 
-func (c *controller) RegisterIpamDriver(name string, driver ipamapi.Ipam) error {
+func (c *controller) registerIpamDriver(name string, driver ipamapi.Ipam, caps *ipamapi.Capability) error {
 	if !config.IsValidName(name) {
 		return ErrInvalidName(name)
 	}
@@ -318,19 +316,27 @@ func (c *controller) RegisterIpamDriver(name string, driver ipamapi.Ipam) error 
 	_, ok := c.ipamDrivers[name]
 	c.Unlock()
 	if ok {
-		return driverapi.ErrActiveRegistration(name)
+		return types.ForbiddenErrorf("ipam driver %q already registered", name)
 	}
 	locAS, glbAS, err := driver.GetDefaultAddressSpaces()
 	if err != nil {
-		return fmt.Errorf("ipam driver %s failed to return default address spaces: %v", name, err)
+		return types.InternalErrorf("ipam driver %q failed to return default address spaces: %v", name, err)
 	}
 	c.Lock()
-	c.ipamDrivers[name] = &ipamData{driver: driver, defaultLocalAddressSpace: locAS, defaultGlobalAddressSpace: glbAS}
+	c.ipamDrivers[name] = &ipamData{driver: driver, defaultLocalAddressSpace: locAS, defaultGlobalAddressSpace: glbAS, capability: caps}
 	c.Unlock()
 
-	log.Debugf("Registering ipam provider: %s", name)
+	log.Debugf("Registering ipam driver: %q", name)
 
 	return nil
+}
+
+func (c *controller) RegisterIpamDriver(name string, driver ipamapi.Ipam) error {
+	return c.registerIpamDriver(name, driver, &ipamapi.Capability{})
+}
+
+func (c *controller) RegisterIpamDriverWithCapabilities(name string, driver ipamapi.Ipam, caps *ipamapi.Capability) error {
+	return c.registerIpamDriver(name, driver, caps)
 }
 
 // NewNetwork creates a new network of the specified network type. The options
@@ -670,7 +676,7 @@ func (c *controller) loadIpamDriver(name string) (*ipamData, error) {
 	id, ok := c.ipamDrivers[name]
 	c.Unlock()
 	if !ok {
-		return nil, ErrInvalidNetworkDriver(name)
+		return nil, types.BadRequestErrorf("invalid ipam driver: %q", name)
 	}
 	return id, nil
 }

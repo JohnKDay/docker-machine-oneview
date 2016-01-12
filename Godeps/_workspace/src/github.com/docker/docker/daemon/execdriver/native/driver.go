@@ -5,6 +5,7 @@ package native
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/daemon/execdriver"
+	"github.com/docker/docker/daemon/execdriver/native/template"
 	"github.com/docker/docker/pkg/parsers"
 	"github.com/docker/docker/pkg/pools"
 	"github.com/docker/docker/pkg/reexec"
@@ -38,7 +40,6 @@ const (
 // it implements execdriver.Driver.
 type Driver struct {
 	root             string
-	initPath         string
 	activeContainers map[string]libcontainer.Container
 	machineMemory    int64
 	factory          libcontainer.Factory
@@ -46,7 +47,7 @@ type Driver struct {
 }
 
 // NewDriver returns a new native driver, called from NewDriver of execdriver.
-func NewDriver(root, initPath string, options []string) (*Driver, error) {
+func NewDriver(root string, options []string) (*Driver, error) {
 	meminfo, err := sysinfo.ReadMemInfo()
 	if err != nil {
 		return nil, err
@@ -74,9 +75,6 @@ func NewDriver(root, initPath string, options []string) (*Driver, error) {
 	// this makes sure there are no breaking changes to people
 	// who upgrade from versions without native.cgroupdriver opt
 	cgm := libcontainer.Cgroupfs
-	if systemd.UseSystemd() {
-		cgm = libcontainer.SystemdCgroups
-	}
 
 	// parse the options
 	for _, option := range options {
@@ -92,6 +90,7 @@ func NewDriver(root, initPath string, options []string) (*Driver, error) {
 			case "systemd":
 				if systemd.UseSystemd() {
 					cgm = libcontainer.SystemdCgroups
+					template.SystemdCgroups = true
 				} else {
 					// warn them that they chose the wrong driver
 					logrus.Warn("You cannot use systemd as native.cgroupdriver, using cgroupfs instead")
@@ -117,7 +116,6 @@ func NewDriver(root, initPath string, options []string) (*Driver, error) {
 
 	return &Driver{
 		root:             root,
-		initPath:         initPath,
 		activeContainers: make(map[string]libcontainer.Container),
 		machineMemory:    meminfo.MemTotal,
 		factory:          f,
@@ -133,6 +131,13 @@ type execOutput struct {
 // it calls libcontainer APIs to run a container.
 func (d *Driver) Run(c *execdriver.Command, pipes *execdriver.Pipes, hooks execdriver.Hooks) (execdriver.ExitStatus, error) {
 	destroyed := false
+	var err error
+	c.TmpDir, err = ioutil.TempDir("", c.ID)
+	if err != nil {
+		return execdriver.ExitStatus{ExitCode: -1}, err
+	}
+	defer os.RemoveAll(c.TmpDir)
+
 	// take the Command and populate the libcontainer.Config from it
 	container, err := d.createContainer(c, hooks)
 	if err != nil {
@@ -391,6 +396,26 @@ func (d *Driver) Stats(id string) (*execdriver.ResourceStats, error) {
 		Read:        now,
 		MemoryLimit: memoryLimit,
 	}, nil
+}
+
+// Update updates configs for a container
+func (d *Driver) Update(c *execdriver.Command) error {
+	d.Lock()
+	cont := d.activeContainers[c.ID]
+	d.Unlock()
+	if cont == nil {
+		return execdriver.ErrNotRunning
+	}
+	config := cont.Config()
+	if err := execdriver.SetupCgroups(&config, c); err != nil {
+		return err
+	}
+
+	if err := cont.Set(config); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // TtyConsole implements the exec driver Terminal interface.

@@ -7,9 +7,7 @@
 		"github.com/stretchr/testify/assert",
 		"golang.org/x/crypto/ssh",
 		"github.com/Sirupsen/logrus",
-		"github.com/Azure/go-ansiterm",
-		"github.com/davecgh/go-spew/spew",
-		"github.com/pmezard/go-difflib/difflib"
+		"github.com/Azure/go-ansiterm"
 	],
 	"Deps": [
 		{
@@ -18,8 +16,8 @@
 		},
 		{
 			"ImportPath": "github.com/Sirupsen/logrus",
-			"Comment": "v0.8.7-35-gfe6f2b0",
-			"Rev": "fe6f2b03125e4fcafb21406381010e363a072c80"
+			"Comment": "v0.8.7-53-g446d1c1",
+			"Rev": "446d1c146faa8ed3f4218f056fcd165f6bcfda81"
 		},
 		{
 			"ImportPath": "github.com/davecgh/go-spew/spew",
@@ -46,11 +44,11 @@
 		},
 		{
 			"ImportPath": "golang.org/x/crypto/curve25519",
-			"Rev": "c8b9e6388ef638d5a8a9d865c634befdc46a6784"
+			"Rev": "552e9d568fde9701ea1944fb01c8aadaceaa7353"
 		},
 		{
 			"ImportPath": "golang.org/x/crypto/ssh",
-			"Rev": "c8b9e6388ef638d5a8a9d865c634befdc46a6784"
+			"Rev": "552e9d568fde9701ea1944fb01c8aadaceaa7353"
 		}
 	]
 }

@@ -56,7 +56,9 @@ for version in "${versions[@]}"; do
 		git # for "git commit" info in "docker -v"
 		libapparmor-dev # for "sys/apparmor.h"
 		libdevmapper-dev # for "libdevmapper.h"
+		libltdl-dev # for pkcs11 "ltdl.h"
 		libsqlite3-dev # for "sqlite3.h"
+		libseccomp-dev  # for "seccomp.h" & "libseccomp.so"
 	)
 	# packaging for "sd-journal.h" and libraries varies
 	case "$suite" in
@@ -64,6 +66,18 @@ for version in "${versions[@]}"; do
 		sid|stretch|wily) packages+=( libsystemd-dev );;
 		*) packages+=( libsystemd-journal-dev );;
 	esac
+
+	# debian wheezy & ubuntu precise do not have the right libseccomp libs
+	# debian jessie & ubuntu trusty have a libseccomp < 2.2.1 :(
+	case "$suite" in
+		precise|wheezy|jessie|trusty)
+			packages=( "${packages[@]/libseccomp-dev}" )
+			;;
+		*)
+			extraBuildTags+=' seccomp'
+			;;
+	esac
+
 
 	if [ "$suite" = 'precise' ]; then
 		# precise has a few package issues
@@ -98,5 +112,11 @@ for version in "${versions[@]}"; do
 	echo >> "$version/Dockerfile"
 
 	echo 'ENV AUTO_GOPATH 1' >> "$version/Dockerfile"
-	awk '$1 == "ENV" && $2 == "DOCKER_BUILDTAGS" { print $0 "'"$extraBuildTags"'"; exit }' ../../../Dockerfile >> "$version/Dockerfile"
+
+	echo >> "$version/Dockerfile"
+
+	# print build tags in alphabetical order
+	buildTags=$( echo "apparmor selinux $extraBuildTags" | xargs -n1 | sort -n | tr '\n' ' ' | sed -e 's/[[:space:]]*$//' )
+
+	echo "ENV DOCKER_BUILDTAGS $buildTags" >> "$version/Dockerfile"
 done

@@ -41,6 +41,10 @@ type Boot2DockerProvisioner struct {
 	SwarmOptions  swarm.Options
 }
 
+func (provisioner *Boot2DockerProvisioner) String() string {
+	return "boot2docker"
+}
+
 func (provisioner *Boot2DockerProvisioner) Service(name string, action serviceaction.ServiceAction) error {
 	_, err := provisioner.SSHCommand(fmt.Sprintf("sudo /etc/init.d/%s %s", name, action.String()))
 	return err
@@ -61,16 +65,6 @@ func (provisioner *Boot2DockerProvisioner) upgradeIso() error {
 		Boot2DockerURL string
 	}
 	json.Unmarshal(jsonDriver, &d)
-
-	log.Info("Downloading latest boot2docker iso...")
-
-	// Usually we call this implicitly, but call it here explicitly to get
-	// the latest default boot2docker ISO.
-	if d.Boot2DockerURL == "" {
-		if err := b2dutils.DownloadLatestBoot2Docker(d.Boot2DockerURL); err != nil {
-			return err
-		}
-	}
 
 	log.Info("Stopping machine to do the upgrade...")
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"strings"
 	"text/template"
 	"time"
@@ -19,8 +20,8 @@ import (
 type Driver struct {
 	*drivers.BaseDriver
 	URL              string
-	ApiKey           string
-	ApiSecretKey     string
+	APIKey           string `json:"ApiKey"`
+	APISecretKey     string `json:"ApiSecretKey"`
 	InstanceProfile  string
 	DiskSize         int
 	Image            string
@@ -28,17 +29,17 @@ type Driver struct {
 	AvailabilityZone string
 	KeyPair          string
 	PublicKey        string
-	Id               string
+	ID               string `json:"Id"`
 }
 
 const (
 	defaultInstanceProfile  = "small"
 	defaultDiskSize         = 50
-	defaultImage            = "ubuntu-14.04"
+	defaultImage            = "ubuntu-15.10"
 	defaultAvailabilityZone = "ch-gva-2"
 )
 
-// RegisterCreateFlags registers the flags this driver adds to
+// GetCreateFlags registers the flags this driver adds to
 // "docker hosts create"
 func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 	return []mcnflag.Flag{
@@ -111,14 +112,15 @@ func (d *Driver) GetSSHUsername() string {
 	return "ubuntu"
 }
 
+// DriverName returns the name of the driver
 func (d *Driver) DriverName() string {
 	return "exoscale"
 }
 
 func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 	d.URL = flags.String("exoscale-endpoint")
-	d.ApiKey = flags.String("exoscale-api-key")
-	d.ApiSecretKey = flags.String("exoscale-api-secret-key")
+	d.APIKey = flags.String("exoscale-api-key")
+	d.APISecretKey = flags.String("exoscale-api-secret-key")
 	d.InstanceProfile = flags.String("exoscale-instance-profile")
 	d.DiskSize = flags.Int("exoscale-disk-size")
 	d.Image = flags.String("exoscale-image")
@@ -128,14 +130,12 @@ func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 	}
 	d.SecurityGroup = strings.Join(securityGroups, ",")
 	d.AvailabilityZone = flags.String("exoscale-availability-zone")
-	d.SwarmMaster = flags.Bool("swarm-master")
-	d.SwarmHost = flags.String("swarm-host")
-	d.SwarmDiscovery = flags.String("swarm-discovery")
+	d.SetSwarmConfigFromFlags(flags)
 
 	if d.URL == "" {
 		d.URL = "https://api.exoscale.ch/compute"
 	}
-	if d.ApiKey == "" || d.ApiSecretKey == "" {
+	if d.APIKey == "" || d.APISecretKey == "" {
 		return fmt.Errorf("Please specify an API key (--exoscale-api-key) and an API secret key (--exoscale-api-secret-key).")
 	}
 
@@ -147,12 +147,12 @@ func (d *Driver) GetURL() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("tcp://%s:2376", ip), nil
+	return fmt.Sprintf("tcp://%s", net.JoinHostPort(ip, "2376")), nil
 }
 
 func (d *Driver) GetState() (state.State, error) {
-	client := egoscale.NewClient(d.URL, d.ApiKey, d.ApiSecretKey)
-	vm, err := client.GetVirtualMachine(d.Id)
+	client := egoscale.NewClient(d.URL, d.APIKey, d.APISecretKey)
+	vm, err := client.GetVirtualMachine(d.ID)
 	if err != nil {
 		return state.Error, err
 	}
@@ -222,7 +222,7 @@ func (d *Driver) createDefaultSecurityGroup(client *egoscale.Client, group strin
 
 func (d *Driver) Create() error {
 	log.Infof("Querying exoscale for the requested parameters...")
-	client := egoscale.NewClient(d.URL, d.ApiKey, d.ApiSecretKey)
+	client := egoscale.NewClient(d.URL, d.APIKey, d.APISecretKey)
 	topology, err := client.GetTopology()
 	if err != nil {
 		return err
@@ -314,55 +314,50 @@ func (d *Driver) Create() error {
 		return err
 	}
 	d.IPAddress = vm.Nic[0].Ipaddress
-	d.Id = vm.Id
+	d.ID = vm.Id
 
 	return nil
 }
 
 func (d *Driver) Start() error {
-	vmstate, err := d.GetState()
+	client := egoscale.NewClient(d.URL, d.APIKey, d.APISecretKey)
+
+	svmresp, err := client.StartVirtualMachine(d.ID)
 	if err != nil {
 		return err
-	}
-	if vmstate == state.Running || vmstate == state.Starting {
-		log.Infof("Host is already running or starting")
-		return nil
 	}
 
-	client := egoscale.NewClient(d.URL, d.ApiKey, d.ApiSecretKey)
-	svmresp, err := client.StartVirtualMachine(d.Id)
-	if err != nil {
-		return err
-	}
-	if err = d.waitForJob(client, svmresp); err != nil {
-		return err
-	}
-	return nil
+	return d.waitForJob(client, svmresp)
 }
 
 func (d *Driver) Stop() error {
-	vmstate, err := d.GetState()
+	client := egoscale.NewClient(d.URL, d.APIKey, d.APISecretKey)
+
+	svmresp, err := client.StopVirtualMachine(d.ID)
 	if err != nil {
 		return err
-	}
-	if vmstate == state.Stopped {
-		log.Infof("Host is already stopped")
-		return nil
 	}
 
-	client := egoscale.NewClient(d.URL, d.ApiKey, d.ApiSecretKey)
-	svmresp, err := client.StopVirtualMachine(d.Id)
+	return d.waitForJob(client, svmresp)
+}
+
+func (d *Driver) Restart() error {
+	client := egoscale.NewClient(d.URL, d.APIKey, d.APISecretKey)
+
+	svmresp, err := client.RebootVirtualMachine(d.ID)
 	if err != nil {
 		return err
 	}
-	if err = d.waitForJob(client, svmresp); err != nil {
-		return err
-	}
-	return nil
+
+	return d.waitForJob(client, svmresp)
+}
+
+func (d *Driver) Kill() error {
+	return d.Stop()
 }
 
 func (d *Driver) Remove() error {
-	client := egoscale.NewClient(d.URL, d.ApiKey, d.ApiSecretKey)
+	client := egoscale.NewClient(d.URL, d.APIKey, d.APISecretKey)
 
 	// Destroy the SSH key
 	if _, err := client.DeleteKeypair(d.KeyPair); err != nil {
@@ -370,7 +365,7 @@ func (d *Driver) Remove() error {
 	}
 
 	// Destroy the virtual machine
-	dvmresp, err := client.DestroyVirtualMachine(d.Id)
+	dvmresp, err := client.DestroyVirtualMachine(d.ID)
 	if err != nil {
 		return err
 	}
@@ -378,31 +373,6 @@ func (d *Driver) Remove() error {
 		return err
 	}
 	return nil
-}
-
-func (d *Driver) Restart() error {
-	vmstate, err := d.GetState()
-	if err != nil {
-		return err
-	}
-	if vmstate == state.Stopped {
-		return fmt.Errorf("Host is stopped, use start command to start it")
-	}
-
-	client := egoscale.NewClient(d.URL, d.ApiKey, d.ApiSecretKey)
-	svmresp, err := client.RebootVirtualMachine(d.Id)
-	if err != nil {
-		return err
-	}
-	if err = d.waitForJob(client, svmresp); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (d *Driver) Kill() error {
-	return d.Stop()
 }
 
 func (d *Driver) jobIsDone(client *egoscale.Client, jobid string) (bool, error) {

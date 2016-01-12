@@ -6,7 +6,9 @@ import (
 	"net"
 	"strings"
 
-	"github.com/docker/docker/daemon/network"
+	"github.com/docker/docker/api/types/network"
+	derr "github.com/docker/docker/errors"
+	"github.com/docker/docker/runconfig"
 	"github.com/docker/libnetwork"
 )
 
@@ -18,7 +20,7 @@ const (
 )
 
 // NetworkControllerEnabled checks if the networking stack is enabled.
-// This feature depends on OS primitives and it's dissabled in systems like Windows.
+// This feature depends on OS primitives and it's disabled in systems like Windows.
 func (daemon *Daemon) NetworkControllerEnabled() bool {
 	return daemon.netController != nil
 }
@@ -85,6 +87,19 @@ func (daemon *Daemon) GetNetworksByID(partialID string) []libnetwork.Network {
 	return list
 }
 
+// GetAllNetworks returns a list containing all networks
+func (daemon *Daemon) GetAllNetworks() []libnetwork.Network {
+	c := daemon.netController
+	list := []libnetwork.Network{}
+	l := func(nw libnetwork.Network) bool {
+		list = append(list, nw)
+		return false
+	}
+	c.WalkNetworks(l)
+
+	return list
+}
+
 // CreateNetwork creates a network with the given name, driver and other optional parameters
 func (daemon *Daemon) CreateNetwork(name, driver string, ipam network.IPAM, options map[string]string) (libnetwork.Network, error) {
 	c := daemon.netController
@@ -101,7 +116,13 @@ func (daemon *Daemon) CreateNetwork(name, driver string, ipam network.IPAM, opti
 
 	nwOptions = append(nwOptions, libnetwork.NetworkOptionIpam(ipam.Driver, "", v4Conf, v6Conf))
 	nwOptions = append(nwOptions, libnetwork.NetworkOptionDriverOpts(options))
-	return c.NewNetwork(driver, name, nwOptions...)
+	n, err := c.NewNetwork(driver, name, nwOptions...)
+	if err != nil {
+		return nil, err
+	}
+
+	daemon.LogNetworkEvent(n, "create")
+	return n, nil
 }
 
 func getIpamConfig(data []network.IPAMConfig) ([]*libnetwork.IpamConf, []*libnetwork.IpamConf, error) {
@@ -130,7 +151,7 @@ func getIpamConfig(data []network.IPAMConfig) ([]*libnetwork.IpamConf, []*libnet
 // network. If either cannot be found, an err is returned. If the
 // network cannot be set up, an err is returned.
 func (daemon *Daemon) ConnectContainerToNetwork(containerName, networkName string) error {
-	container, err := daemon.Get(containerName)
+	container, err := daemon.GetContainer(containerName)
 	if err != nil {
 		return err
 	}
@@ -140,9 +161,46 @@ func (daemon *Daemon) ConnectContainerToNetwork(containerName, networkName strin
 // DisconnectContainerFromNetwork disconnects the given container from
 // the given network. If either cannot be found, an err is returned.
 func (daemon *Daemon) DisconnectContainerFromNetwork(containerName string, network libnetwork.Network) error {
-	container, err := daemon.Get(containerName)
+	container, err := daemon.GetContainer(containerName)
 	if err != nil {
 		return err
 	}
-	return container.DisconnectFromNetwork(network)
+	return daemon.DisconnectFromNetwork(container, network)
+}
+
+// GetNetworkDriverList returns the list of plugins drivers
+// registered for network.
+func (daemon *Daemon) GetNetworkDriverList() map[string]bool {
+	pluginList := make(map[string]bool)
+
+	if !daemon.NetworkControllerEnabled() {
+		return nil
+	}
+	c := daemon.netController
+	networks := c.Networks()
+
+	for _, network := range networks {
+		driver := network.Type()
+		pluginList[driver] = true
+	}
+
+	return pluginList
+}
+
+// DeleteNetwork destroys a network unless it's one of docker's predefined networks.
+func (daemon *Daemon) DeleteNetwork(networkID string) error {
+	nw, err := daemon.FindNetwork(networkID)
+	if err != nil {
+		return err
+	}
+
+	if runconfig.IsPreDefinedNetwork(nw.Name()) {
+		return derr.ErrorCodeCantDeletePredefinedNetwork.WithArgs(nw.Name())
+	}
+
+	if err := nw.Delete(); err != nil {
+		return err
+	}
+	daemon.LogNetworkEvent(nw, "destroy")
+	return nil
 }

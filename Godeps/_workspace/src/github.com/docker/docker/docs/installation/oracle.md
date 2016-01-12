@@ -16,7 +16,7 @@ Support subscription to install Docker on Oracle Linux.
 This page instructs you to install using Docker-managed release packages and
 installation mechanisms. Using these packages ensures you get the latest release
 of Docker. If you wish to install using Oracle-managed packages, consult your
-[Oracle Linux documentation](https://linux.oracle.com).
+[Oracle Linux documentation](https://oracle.com/linux).
 
 
 ## Prerequisites
@@ -40,7 +40,7 @@ btrfs storage engine on both Oracle Linux 6 and 7.
 
     For version 6:
 
-        $ cat >/etc/yum.repos.d/docker.repo <<-EOF
+        $ sudo tee /etc/yum.repos.d/docker.repo <<-EOF
         [dockerrepo]
         name=Docker Repository
         baseurl=https://yum.dockerproject.org/repo/main/oraclelinux/6
@@ -62,7 +62,7 @@ btrfs storage engine on both Oracle Linux 6 and 7.
 
 4. Install the Docker package.
 
-        $ sudo yum install docker
+        $ sudo yum install docker-engine
 
 5. Start the Docker daemon.
 
@@ -166,7 +166,7 @@ To enable btrfs support on Oracle Linux:
 
 To uninstall the Docker package:
 
-    $ sudo yum -y remove docker
+    $ sudo yum -y remove docker-engine
 
 The above command will not remove images, containers, volumes, or user created
 configuration files on your host. If you wish to delete all images, containers,

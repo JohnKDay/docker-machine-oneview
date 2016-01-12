@@ -4,11 +4,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/docker/docker/daemon/network"
-	"github.com/docker/docker/pkg/nat"
-	"github.com/docker/docker/pkg/version"
-	"github.com/docker/docker/registry"
-	"github.com/docker/docker/runconfig"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/registry"
+	"github.com/docker/go-connections/nat"
 )
 
 // ContainerCreateResponse contains the information returned to a client on the
@@ -26,6 +25,13 @@ type ContainerCreateResponse struct {
 type ContainerExecCreateResponse struct {
 	// ID is the exec ID.
 	ID string `json:"Id"`
+}
+
+// ContainerUpdateResponse contains response of Remote API:
+// POST /containers/{name:.*}/update
+type ContainerUpdateResponse struct {
+	// Warnings are any warnings encountered during the updating of the container.
+	Warnings []string `json:"Warnings"`
 }
 
 // AuthResponse contains response of Remote API:
@@ -103,10 +109,10 @@ type ImageInspect struct {
 	Comment         string
 	Created         string
 	Container       string
-	ContainerConfig *runconfig.Config
+	ContainerConfig *container.Config
 	DockerVersion   string
 	Author          string
-	Config          *runconfig.Config
+	Config          *container.Config
 	Architecture    string
 	Os              string
 	Size            int64
@@ -140,6 +146,7 @@ type Container struct {
 	HostConfig struct {
 		NetworkMode string `json:",omitempty"`
 	}
+	NetworkSettings *SummaryNetworkSettings
 }
 
 // CopyConfig contains request body of Remote API:
@@ -170,7 +177,7 @@ type ContainerProcessList struct {
 // GET "/version"
 type Version struct {
 	Version       string
-	APIVersion    version.Version `json:"ApiVersion"`
+	APIVersion    string `json:"ApiVersion"`
 	GitCommit     string
 	GoVersion     string
 	Os            string
@@ -188,10 +195,13 @@ type Info struct {
 	Images             int
 	Driver             string
 	DriverStatus       [][2]string
+	Plugins            PluginsInfo
 	MemoryLimit        bool
 	SwapLimit          bool
 	CPUCfsPeriod       bool `json:"CpuCfsPeriod"`
 	CPUCfsQuota        bool `json:"CpuCfsQuota"`
+	CPUShares          bool
+	CPUSet             bool
 	IPv4Forwarding     bool
 	BridgeNfIptables   bool
 	BridgeNfIP6tables  bool `json:"BridgeNfIp6tables"`
@@ -205,6 +215,8 @@ type Info struct {
 	NEventsListener    int
 	KernelVersion      string
 	OperatingSystem    string
+	OSType             string
+	Architecture       string
 	IndexServerAddress string
 	RegistryConfig     *registry.ServiceConfig
 	InitSha1           string
@@ -221,6 +233,17 @@ type Info struct {
 	ServerVersion      string
 	ClusterStore       string
 	ClusterAdvertise   string
+}
+
+// PluginsInfo is temp struct holds Plugins name
+// registered with docker daemon. It used by Info struct
+type PluginsInfo struct {
+	// List of Volume plugins registered
+	Volume []string
+	// List of Network plugins registered
+	Network []string
+	// List of Authorization plugins registered
+	Authorization []string
 }
 
 // ExecStartCheck is a temp struct used by execStart
@@ -268,7 +291,7 @@ type ContainerJSONBase struct {
 	ProcessLabel    string
 	AppArmorProfile string
 	ExecIDs         []string
-	HostConfig      *runconfig.HostConfig
+	HostConfig      *container.HostConfig
 	GraphDriver     GraphDriverData
 	SizeRw          *int64 `json:",omitempty"`
 	SizeRootFs      *int64 `json:",omitempty"`
@@ -278,7 +301,7 @@ type ContainerJSONBase struct {
 type ContainerJSON struct {
 	*ContainerJSONBase
 	Mounts          []MountPoint
-	Config          *runconfig.Config
+	Config          *container.Config
 	NetworkSettings *NetworkSettings
 }
 
@@ -286,6 +309,12 @@ type ContainerJSON struct {
 type NetworkSettings struct {
 	NetworkSettingsBase
 	DefaultNetworkSettings
+	Networks map[string]*network.EndpointSettings
+}
+
+// SummaryNetworkSettings provides a summary of container's networks
+// in /containers/json
+type SummaryNetworkSettings struct {
 	Networks map[string]*network.EndpointSettings
 }
 
@@ -324,6 +353,7 @@ type MountPoint struct {
 	Driver      string `json:",omitempty"`
 	Mode        string
 	RW          bool
+	Propagation string
 }
 
 // Volume represents the configuration of a volume for the remote API
@@ -336,7 +366,8 @@ type Volume struct {
 // VolumesListResponse contains the response for the remote API:
 // GET "/volumes"
 type VolumesListResponse struct {
-	Volumes []*Volume // Volumes is the list of volumes being returned
+	Volumes  []*Volume // Volumes is the list of volumes being returned
+	Warnings []string  // Warnings is a list of warnings that occurred when getting the list from the volume drivers
 }
 
 // VolumeCreateRequest contains the response for the remote API:
@@ -360,6 +391,7 @@ type NetworkResource struct {
 
 // EndpointResource contains network resources allocated and used for a container in a network
 type EndpointResource struct {
+	Name        string
 	EndpointID  string
 	MacAddress  string
 	IPv4Address string

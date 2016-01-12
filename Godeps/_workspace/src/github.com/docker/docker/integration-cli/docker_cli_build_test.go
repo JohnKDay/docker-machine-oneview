@@ -2,12 +2,10 @@ package main
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,6 +149,8 @@ func (s *DockerSuite) TestBuildEnvironmentReplacementExpose(c *check.C) {
   FROM scratch
   ENV port 80
   EXPOSE ${port}
+  ENV ports "  99   100 "
+  EXPOSE ${ports}
   `, true)
 	if err != nil {
 		c.Fatal(err)
@@ -167,8 +167,13 @@ func (s *DockerSuite) TestBuildEnvironmentReplacementExpose(c *check.C) {
 		c.Fatal(err)
 	}
 
-	if _, ok := exposedPorts["80/tcp"]; !ok {
-		c.Fatal("Exposed port 80 from environment not in Config.ExposedPorts on image")
+	exp := []int{80, 99, 100}
+
+	for _, p := range exp {
+		tmp := fmt.Sprintf("%d/tcp", p)
+		if _, ok := exposedPorts[tmp]; !ok {
+			c.Fatalf("Exposed port %d from environment not in Config.ExposedPorts on image", p)
+		}
 	}
 
 }
@@ -752,7 +757,7 @@ ADD test_file .`,
 		close(errChan)
 	}()
 	select {
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		c.Fatal("Build with adding to workdir timed out")
 	case err := <-errChan:
 		c.Assert(err, check.IsNil)
@@ -1401,7 +1406,7 @@ COPY test_file .`,
 		close(errChan)
 	}()
 	select {
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		c.Fatal("Build with adding to workdir timed out")
 	case err := <-errChan:
 		c.Assert(err, check.IsNil)
@@ -1857,115 +1862,6 @@ func (s *DockerSuite) TestBuildForceRm(c *check.C) {
 
 }
 
-// Test that an infinite sleep during a build is killed if the client disconnects.
-// This test is fairly hairy because there are lots of ways to race.
-// Strategy:
-// * Monitor the output of docker events starting from before
-// * Run a 1-year-long sleep from a docker build.
-// * When docker events sees container start, close the "docker build" command
-// * Wait for docker events to emit a dying event.
-func (s *DockerSuite) TestBuildCancellationKillsSleep(c *check.C) {
-	testRequires(c, DaemonIsLinux)
-	name := "testbuildcancellation"
-
-	// (Note: one year, will never finish)
-	ctx, err := fakeContext("FROM busybox\nRUN sleep 31536000", nil)
-	if err != nil {
-		c.Fatal(err)
-	}
-	defer ctx.Close()
-
-	finish := make(chan struct{})
-	defer close(finish)
-
-	eventStart := make(chan struct{})
-	eventDie := make(chan struct{})
-	containerID := make(chan string)
-
-	startEpoch := daemonTime(c).Unix()
-	// Watch for events since epoch.
-	eventsCmd := exec.Command(
-		dockerBinary, "events",
-		"--since", strconv.FormatInt(startEpoch, 10))
-	stdout, err := eventsCmd.StdoutPipe()
-	if err != nil {
-		c.Fatal(err)
-	}
-	if err := eventsCmd.Start(); err != nil {
-		c.Fatal(err)
-	}
-	defer eventsCmd.Process.Kill()
-
-	// Goroutine responsible for watching start/die events from `docker events`
-	go func() {
-		cid := <-containerID
-
-		matchStart := regexp.MustCompile(cid + `(.*) start$`)
-		matchDie := regexp.MustCompile(cid + `(.*) die$`)
-
-		//
-		// Read lines of `docker events` looking for container start and stop.
-		//
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			switch {
-			case matchStart.MatchString(scanner.Text()):
-				close(eventStart)
-			case matchDie.MatchString(scanner.Text()):
-				close(eventDie)
-			}
-		}
-	}()
-
-	buildCmd := exec.Command(dockerBinary, "build", "-t", name, ".")
-	buildCmd.Dir = ctx.Dir
-
-	stdoutBuild, err := buildCmd.StdoutPipe()
-	if err := buildCmd.Start(); err != nil {
-		c.Fatalf("failed to run build: %s", err)
-	}
-
-	matchCID := regexp.MustCompile("Running in ")
-	scanner := bufio.NewScanner(stdoutBuild)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if ok := matchCID.MatchString(line); ok {
-			containerID <- line[len(line)-12:]
-			break
-		}
-	}
-
-	select {
-	case <-time.After(5 * time.Second):
-		c.Fatal("failed to observe build container start in timely fashion")
-	case <-eventStart:
-		// Proceeds from here when we see the container fly past in the
-		// output of "docker events".
-		// Now we know the container is running.
-	}
-
-	// Send a kill to the `docker build` command.
-	// Causes the underlying build to be cancelled due to socket close.
-	if err := buildCmd.Process.Kill(); err != nil {
-		c.Fatalf("error killing build command: %s", err)
-	}
-
-	// Get the exit status of `docker build`, check it exited because killed.
-	if err := buildCmd.Wait(); err != nil && !isKilled(err) {
-		c.Fatalf("wait failed during build run: %T %s", err, err)
-	}
-
-	select {
-	case <-time.After(5 * time.Second):
-		// If we don't get here in a timely fashion, it wasn't killed.
-		c.Fatal("container cancel did not succeed")
-	case <-eventDie:
-		// We saw the container shut down in the `docker events` stream,
-		// as expected.
-	}
-
-}
-
 func (s *DockerSuite) TestBuildRm(c *check.C) {
 	testRequires(c, DaemonIsLinux)
 	name := "testbuildrm"
@@ -2244,6 +2140,39 @@ func (s *DockerSuite) TestBuildEnv(c *check.C) {
 	}
 	if res != expected {
 		c.Fatalf("Env %s, expected %s", res, expected)
+	}
+}
+
+func (s *DockerSuite) TestBuildPATH(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+
+	defPath := "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+	fn := func(dockerfile string, exp string) {
+		_, err := buildImage("testbldpath", dockerfile, true)
+		c.Assert(err, check.IsNil)
+
+		res, err := inspectField("testbldpath", "Config.Env")
+		c.Assert(err, check.IsNil)
+
+		if res != exp {
+			c.Fatalf("Env %q, expected %q for dockerfile:%q", res, exp, dockerfile)
+		}
+	}
+
+	tests := []struct{ dockerfile, exp string }{
+		{"FROM scratch\nMAINTAINER me", "[PATH=" + defPath + "]"},
+		{"FROM busybox\nMAINTAINER me", "[PATH=" + defPath + "]"},
+		{"FROM scratch\nENV FOO=bar", "[PATH=" + defPath + " FOO=bar]"},
+		{"FROM busybox\nENV FOO=bar", "[PATH=" + defPath + " FOO=bar]"},
+		{"FROM scratch\nENV PATH=/test", "[PATH=/test]"},
+		{"FROM busybox\nENV PATH=/test", "[PATH=/test]"},
+		{"FROM scratch\nENV PATH=''", "[PATH=]"},
+		{"FROM busybox\nENV PATH=''", "[PATH=]"},
+	}
+
+	for _, test := range tests {
+		fn(test.dockerfile, test.exp)
 	}
 }
 
@@ -3463,12 +3392,18 @@ func (s *DockerSuite) TestBuildDockerignore(c *check.C) {
 		RUN [[ ! -e /bla/README.md ]]
 		RUN [[ ! -e /bla/dir/foo ]]
 		RUN [[ ! -e /bla/foo ]]
-		RUN [[ ! -e /bla/.git ]]`
+		RUN [[ ! -e /bla/.git ]]
+		RUN [[ ! -e v.cc ]]
+		RUN [[ ! -e src/v.cc ]]
+		RUN [[ ! -e src/_vendor/v.cc ]]`
 	ctx, err := fakeContext(dockerfile, map[string]string{
 		"Makefile":         "all:",
 		".git/HEAD":        "ref: foo",
 		"src/x.go":         "package main",
 		"src/_vendor/v.go": "package main",
+		"src/_vendor/v.cc": "package main",
+		"src/v.cc":         "package main",
+		"v.cc":             "package main",
 		"dir/foo":          "",
 		".gitignore":       "",
 		"README.md":        "readme",
@@ -3478,6 +3413,7 @@ pkg
 .gitignore
 src/_vendor
 *.md
+**/*.cc
 dir`,
 	})
 	if err != nil {
@@ -3527,7 +3463,8 @@ func (s *DockerSuite) TestBuildDockerignoreExceptions(c *check.C) {
 		RUN [[ -f /bla/dir/e ]]
 		RUN [[ -f /bla/dir/e-dir/foo ]]
 		RUN [[ ! -e /bla/foo ]]
-		RUN [[ ! -e /bla/.git ]]`
+		RUN [[ ! -e /bla/.git ]]
+		RUN [[ -e /bla/dir/a.cc ]]`
 	ctx, err := fakeContext(dockerfile, map[string]string{
 		"Makefile":         "all:",
 		".git/HEAD":        "ref: foo",
@@ -3541,6 +3478,7 @@ func (s *DockerSuite) TestBuildDockerignoreExceptions(c *check.C) {
 		"dir/e-dir/foo":    "",
 		".gitignore":       "",
 		"README.md":        "readme",
+		"dir/a.cc":         "hello",
 		".dockerignore": `
 .git
 pkg
@@ -3549,7 +3487,9 @@ src/_vendor
 *.md
 dir
 !dir/e*
-!dir/dir/foo`,
+!dir/dir/foo
+**/*.cc
+!**/*.cc`,
 	})
 	if err != nil {
 		c.Fatal(err)
@@ -3732,7 +3672,7 @@ func (s *DockerSuite) TestBuildDockerignoringWholeDir(c *check.C) {
 
 func (s *DockerSuite) TestBuildDockerignoringBadExclusion(c *check.C) {
 	testRequires(c, DaemonIsLinux)
-	name := "testbuilddockerignorewholedir"
+	name := "testbuilddockerignorebadexclusion"
 	dockerfile := `
         FROM busybox
 		COPY . /
@@ -3753,6 +3693,112 @@ func (s *DockerSuite) TestBuildDockerignoringBadExclusion(c *check.C) {
 	if err.Error() != "failed to build the image: Error checking context: 'Illegal exclusion pattern: !'.\n" {
 		c.Fatalf("Incorrect output, got:%q", err.Error())
 	}
+}
+
+func (s *DockerSuite) TestBuildDockerignoringWildTopDir(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+
+	dockerfile := `
+        FROM busybox
+		COPY . /
+		RUN [[ ! -e /.dockerignore ]]
+		RUN [[ ! -e /Dockerfile ]]
+		RUN [[ ! -e /file1 ]]
+		RUN [[ ! -e /dir ]]`
+
+	ctx, err := fakeContext(dockerfile, map[string]string{
+		"Dockerfile": "FROM scratch",
+		"file1":      "",
+		"dir/dfile1": "",
+	})
+	c.Assert(err, check.IsNil)
+	defer ctx.Close()
+
+	// All of these should result in ignoring all files
+	for _, variant := range []string{"**", "**/", "**/**", "*"} {
+		ctx.Add(".dockerignore", variant)
+		_, err = buildImageFromContext("noname", ctx, true)
+		c.Assert(err, check.IsNil, check.Commentf("variant: %s", variant))
+	}
+}
+
+func (s *DockerSuite) TestBuildDockerignoringWildDirs(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+
+	dockerfile := `
+        FROM busybox
+		COPY . /
+		RUN [[ -e /.dockerignore ]]
+		RUN [[ -e /Dockerfile ]]
+
+		RUN [[ ! -e /file0 ]]
+		RUN [[ ! -e /dir1/file0 ]]
+		RUN [[ ! -e /dir2/file0 ]]
+
+		RUN [[ ! -e /file1 ]]
+		RUN [[ ! -e /dir1/file1 ]]
+		RUN [[ ! -e /dir1/dir2/file1 ]]
+
+		RUN [[ ! -e /dir1/file2 ]]
+		RUN [[   -e /dir1/dir2/file2 ]]
+
+		RUN [[ ! -e /dir1/dir2/file4 ]]
+		RUN [[ ! -e /dir1/dir2/file5 ]]
+		RUN [[ ! -e /dir1/dir2/file6 ]]
+		RUN [[ ! -e /dir1/dir3/file7 ]]
+		RUN [[ ! -e /dir1/dir3/file8 ]]
+		RUN [[   -e /dir1/dir3 ]]
+		RUN [[   -e /dir1/dir4 ]]
+
+		RUN [[ ! -e 'dir1/dir5/fileAA' ]]
+		RUN [[   -e 'dir1/dir5/fileAB' ]]
+		RUN [[   -e 'dir1/dir5/fileB' ]]   # "." in pattern means nothing
+
+		RUN echo all done!`
+
+	ctx, err := fakeContext(dockerfile, map[string]string{
+		"Dockerfile":      "FROM scratch",
+		"file0":           "",
+		"dir1/file0":      "",
+		"dir1/dir2/file0": "",
+
+		"file1":           "",
+		"dir1/file1":      "",
+		"dir1/dir2/file1": "",
+
+		"dir1/file2":      "",
+		"dir1/dir2/file2": "", // remains
+
+		"dir1/dir2/file4": "",
+		"dir1/dir2/file5": "",
+		"dir1/dir2/file6": "",
+		"dir1/dir3/file7": "",
+		"dir1/dir3/file8": "",
+		"dir1/dir4/file9": "",
+
+		"dir1/dir5/fileAA": "",
+		"dir1/dir5/fileAB": "",
+		"dir1/dir5/fileB":  "",
+
+		".dockerignore": `
+**/file0
+**/*file1
+**/dir1/file2
+dir1/**/file4
+**/dir2/file5
+**/dir1/dir2/file6
+dir1/dir3/**
+**/dir4/**
+**/file?A
+**/file\?B
+**/dir5/file.
+`,
+	})
+	c.Assert(err, check.IsNil)
+	defer ctx.Close()
+
+	_, err = buildImageFromContext("noname", ctx, true)
+	c.Assert(err, check.IsNil)
 }
 
 func (s *DockerSuite) TestBuildLineBreak(c *check.C) {
@@ -4093,6 +4139,79 @@ RUN cat /existing-directory-trailing-slash/test/foo | grep Hi`
 
 }
 
+func (s *DockerSuite) TestBuildAddBrokenTar(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	name := "testbuildaddbrokentar"
+
+	ctx := func() *FakeContext {
+		dockerfile := `
+FROM busybox
+ADD test.tar /`
+		tmpDir, err := ioutil.TempDir("", "fake-context")
+		c.Assert(err, check.IsNil)
+		testTar, err := os.Create(filepath.Join(tmpDir, "test.tar"))
+		if err != nil {
+			c.Fatalf("failed to create test.tar archive: %v", err)
+		}
+		defer testTar.Close()
+
+		tw := tar.NewWriter(testTar)
+
+		if err := tw.WriteHeader(&tar.Header{
+			Name: "test/foo",
+			Size: 2,
+		}); err != nil {
+			c.Fatalf("failed to write tar file header: %v", err)
+		}
+		if _, err := tw.Write([]byte("Hi")); err != nil {
+			c.Fatalf("failed to write tar file content: %v", err)
+		}
+		if err := tw.Close(); err != nil {
+			c.Fatalf("failed to close tar archive: %v", err)
+		}
+
+		// Corrupt the tar by removing one byte off the end
+		stat, err := testTar.Stat()
+		if err != nil {
+			c.Fatalf("failed to stat tar archive: %v", err)
+		}
+		if err := testTar.Truncate(stat.Size() - 1); err != nil {
+			c.Fatalf("failed to truncate tar archive: %v", err)
+		}
+
+		if err := ioutil.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
+			c.Fatalf("failed to open destination dockerfile: %v", err)
+		}
+		return fakeContextFromDir(tmpDir)
+	}()
+	defer ctx.Close()
+
+	if _, err := buildImageFromContext(name, ctx, true); err == nil {
+		c.Fatalf("build should have failed for TestBuildAddBrokenTar")
+	}
+}
+
+func (s *DockerSuite) TestBuildAddNonTar(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	name := "testbuildaddnontar"
+
+	// Should not try to extract test.tar
+	ctx, err := fakeContext(`
+		FROM busybox
+		ADD test.tar /
+		RUN test -f /test.tar`,
+		map[string]string{"test.tar": "not_a_tar_file"})
+
+	if err != nil {
+		c.Fatal(err)
+	}
+	defer ctx.Close()
+
+	if _, err := buildImageFromContext(name, ctx, true); err != nil {
+		c.Fatalf("build failed for TestBuildAddNonTar")
+	}
+}
+
 func (s *DockerSuite) TestBuildAddTarXz(c *check.C) {
 	// /test/foo is not owned by the correct user
 	testRequires(c, NotUserNamespace)
@@ -4417,9 +4536,9 @@ func (s *DockerSuite) TestBuildInvalidTag(c *check.C) {
 	testRequires(c, DaemonIsLinux)
 	name := "abcd:" + stringutils.GenerateRandomAlphaOnlyString(200)
 	_, out, err := buildImageWithOut(name, "FROM scratch\nMAINTAINER quux\n", true)
-	// if the error doesnt check for illegal tag name, or the image is built
+	// if the error doesn't check for illegal tag name, or the image is built
 	// then this should fail
-	if !strings.Contains(out, "Illegal tag name") || strings.Contains(out, "Sending build context to Docker daemon") {
+	if !strings.Contains(out, "Error parsing reference") || strings.Contains(out, "Sending build context to Docker daemon") {
 		c.Fatalf("failed to stop before building. Error: %s, Output: %s", err, out)
 	}
 }
@@ -4622,7 +4741,7 @@ func (s *DockerSuite) TestBuildVerifySingleQuoteFails(c *check.C) {
 	// This testcase is supposed to generate an error because the
 	// JSON array we're passing in on the CMD uses single quotes instead
 	// of double quotes (per the JSON spec). This means we interpret it
-	// as a "string" insead of "JSON array" and pass it on to "sh -c" and
+	// as a "string" instead of "JSON array" and pass it on to "sh -c" and
 	// it should barf on it.
 	name := "testbuildsinglequotefails"
 
@@ -4744,6 +4863,110 @@ func (s *DockerSuite) TestBuildLabelsCache(c *check.C) {
 		c.Fatalf("Build 6 should have worked & NOT used the cache(%s,%s): %q", id1, id2, err)
 	}
 
+}
+
+func (s *DockerSuite) TestBuildNotVerboseSuccess(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	// This test makes sure that -q works correctly when build is successful:
+	// stdout has only the image ID (long image ID) and stderr is empty.
+	var stdout, stderr string
+	var err error
+	outRegexp := regexp.MustCompile("^(sha256:|)[a-z0-9]{64}\\n$")
+
+	tt := []struct {
+		Name      string
+		BuildFunc func(string)
+	}{
+		{
+			Name: "quiet_build_stdin_success",
+			BuildFunc: func(name string) {
+				_, stdout, stderr, err = buildImageWithStdoutStderr(name, "FROM busybox", true, "-q", "--force-rm", "--rm")
+			},
+		},
+		{
+			Name: "quiet_build_ctx_success",
+			BuildFunc: func(name string) {
+				ctx, err := fakeContext("FROM busybox", map[string]string{
+					"quiet_build_success_fctx": "test",
+				})
+				if err != nil {
+					c.Fatalf("Failed to create context: %s", err.Error())
+				}
+				defer ctx.Close()
+				_, stdout, stderr, err = buildImageFromContextWithStdoutStderr(name, ctx, true, "-q", "--force-rm", "--rm")
+			},
+		},
+		{
+			Name: "quiet_build_git_success",
+			BuildFunc: func(name string) {
+				git, err := newFakeGit("repo", map[string]string{
+					"Dockerfile": "FROM busybox",
+				}, true)
+				if err != nil {
+					c.Fatalf("Failed to create the git repo: %s", err.Error())
+				}
+				defer git.Close()
+				_, stdout, stderr, err = buildImageFromGitWithStdoutStderr(name, git, true, "-q", "--force-rm", "--rm")
+
+			},
+		},
+	}
+
+	for _, te := range tt {
+		te.BuildFunc(te.Name)
+		if err != nil {
+			c.Fatalf("Test %s shouldn't fail, but got the following error: %s", te.Name, err.Error())
+		}
+		if outRegexp.Find([]byte(stdout)) == nil {
+			c.Fatalf("Test %s expected stdout to match the [%v] regexp, but it is [%v]", te.Name, outRegexp, stdout)
+		}
+		if stderr != "" {
+			c.Fatalf("Test %s expected stderr to be empty, but it is [%#v]", te.Name, stderr)
+		}
+	}
+
+}
+
+func (s *DockerSuite) TestBuildNotVerboseFailure(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	// This test makes sure that -q works correctly when build fails by
+	// comparing between the stderr output in quiet mode and in stdout
+	// and stderr output in verbose mode
+	tt := []struct {
+		TestName  string
+		BuildCmds string
+	}{
+		{"quiet_build_no_from_at_the_beginning", "RUN whoami"},
+		{"quiet_build_unknown_instr", "FROMD busybox"},
+		{"quiet_build_not_exists_image", "FROM busybox11"},
+	}
+
+	for _, te := range tt {
+		_, _, qstderr, qerr := buildImageWithStdoutStderr(te.TestName, te.BuildCmds, false, "-q", "--force-rm", "--rm")
+		_, vstdout, vstderr, verr := buildImageWithStdoutStderr(te.TestName, te.BuildCmds, false, "--force-rm", "--rm")
+		if verr == nil || qerr == nil {
+			c.Fatal(fmt.Errorf("Test [%s] expected to fail but didn't", te.TestName))
+		}
+		if qstderr != vstdout+vstderr {
+			c.Fatal(fmt.Errorf("Test[%s] expected that quiet stderr and verbose stdout are equal; quiet [%v], verbose [%v]", te.TestName, qstderr, vstdout))
+		}
+	}
+}
+
+func (s *DockerSuite) TestBuildNotVerboseFailureRemote(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	// This test ensures that when given a wrong URL, stderr in quiet mode and
+	// stdout and stderr in verbose mode are identical.
+	URL := "http://bla.bla.com"
+	Name := "quiet_build_wrong_remote"
+	_, _, qstderr, qerr := buildImageWithStdoutStderr(Name, "", false, "-q", "--force-rm", "--rm", URL)
+	_, vstdout, vstderr, verr := buildImageWithStdoutStderr(Name, "", false, "--force-rm", "--rm", URL)
+	if qerr == nil || verr == nil {
+		c.Fatal(fmt.Errorf("Test [%s] expected to fail but didn't", Name))
+	}
+	if qstderr != vstdout+vstderr {
+		c.Fatal(fmt.Errorf("Test[%s] expected that quiet stderr and verbose stdout are equal; quiet [%v], verbose [%v]", Name, qstderr, vstdout))
+	}
 }
 
 func (s *DockerSuite) TestBuildStderr(c *check.C) {
@@ -5392,34 +5615,6 @@ func (s *DockerSuite) TestBuildDotDotFile(c *check.C) {
 	if _, err = buildImageFromContext("sc", ctx, false); err != nil {
 		c.Fatalf("Build was supposed to work: %s", err)
 	}
-}
-
-func (s *DockerSuite) TestBuildNotVerbose(c *check.C) {
-	testRequires(c, DaemonIsLinux)
-	ctx, err := fakeContext("FROM busybox\nENV abc=hi\nRUN echo $abc there", map[string]string{})
-	if err != nil {
-		c.Fatal(err)
-	}
-	defer ctx.Close()
-
-	// First do it w/verbose - baseline
-	out, _, err := dockerCmdInDir(c, ctx.Dir, "build", "--no-cache", "-t", "verbose", ".")
-	if err != nil {
-		c.Fatalf("failed to build the image w/o -q: %s, %v", out, err)
-	}
-	if !strings.Contains(out, "hi there") {
-		c.Fatalf("missing output:%s\n", out)
-	}
-
-	// Now do it w/o verbose
-	out, _, err = dockerCmdInDir(c, ctx.Dir, "build", "--no-cache", "-q", "-t", "verbose", ".")
-	if err != nil {
-		c.Fatalf("failed to build the image w/ -q: %s, %v", out, err)
-	}
-	if strings.Contains(out, "hi there") {
-		c.Fatalf("Bad output, should not contain 'hi there':%s", out)
-	}
-
 }
 
 func (s *DockerSuite) TestBuildRUNoneJSON(c *check.C) {
@@ -6227,36 +6422,27 @@ func (s *DockerSuite) TestBuildNoNamedVolume(c *check.C) {
 
 func (s *DockerSuite) TestBuildTagEvent(c *check.C) {
 	testRequires(c, DaemonIsLinux)
-	resp, rc, err := sockRequestRaw("GET", `/events?filters={"event":["tag"]}`, nil, "application/json")
-	c.Assert(err, check.IsNil)
-	defer rc.Close()
-	c.Assert(resp.StatusCode, check.Equals, http.StatusOK)
 
-	type event struct {
-		Status string `json:"status"`
-		ID     string `json:"id"`
-	}
-	ch := make(chan event)
-	go func() {
-		ev := event{}
-		if err := json.NewDecoder(rc).Decode(&ev); err == nil {
-			ch <- ev
-		}
-	}()
+	since := daemonTime(c).Unix()
 
 	dockerFile := `FROM busybox
 	RUN echo events
 	`
-	_, err = buildImage("test", dockerFile, false)
+	_, err := buildImage("test", dockerFile, false)
 	c.Assert(err, check.IsNil)
 
-	select {
-	case ev := <-ch:
-		c.Assert(ev.Status, check.Equals, "tag")
-		c.Assert(ev.ID, check.Equals, "test:")
-	case <-time.After(time.Second):
-		c.Fatal("The 'tag' event not heard from the server")
+	out, _ := dockerCmd(c, "events", fmt.Sprintf("--since=%d", since), fmt.Sprintf("--until=%d", daemonTime(c).Unix()), "--filter", "type=image")
+	events := strings.Split(strings.TrimSpace(out), "\n")
+	actions := eventActionsByIDAndType(c, events, "test:latest", "image")
+	var foundTag bool
+	for _, a := range actions {
+		if a == "tag" {
+			foundTag = true
+			break
+		}
 	}
+
+	c.Assert(foundTag, checker.True, check.Commentf("No tag event found:\n%s", out))
 }
 
 // #15780
@@ -6400,4 +6586,31 @@ func (s *DockerSuite) TestBuildSymlinkBasename(c *check.C) {
 	out, _ := dockerCmd(c, "run", "--rm", id, "cat", "asymlink")
 	c.Assert(out, checker.Matches, "bar")
 
+}
+
+// #17827
+func (s *DockerSuite) TestBuildCacheRootSource(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+	name := "testbuildrootsource"
+	ctx, err := fakeContext(`
+	FROM busybox
+	COPY / /data`,
+		map[string]string{
+			"foo": "bar",
+		})
+	c.Assert(err, checker.IsNil)
+	defer ctx.Close()
+
+	// warm up cache
+	_, err = buildImageFromContext(name, ctx, true)
+	c.Assert(err, checker.IsNil)
+
+	// change file, should invalidate cache
+	err = ioutil.WriteFile(filepath.Join(ctx.Dir, "foo"), []byte("baz"), 0644)
+	c.Assert(err, checker.IsNil)
+
+	_, out, err := buildImageFromContextWithOut(name, ctx, true)
+	c.Assert(err, checker.IsNil)
+
+	c.Assert(out, checker.Not(checker.Contains), "Using cache")
 }
